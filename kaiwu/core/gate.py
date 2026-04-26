@@ -15,8 +15,17 @@ GATE_SYSTEM = "你是任务分类器。只返回JSON，不要有其他内容。"
 
 GATE_PROMPT = """分析用户输入，返回分类JSON。
 
-expert_type选项：locator_repair | codegen | refactor | doc | office
+expert_type选项：
+- locator_repair：修复bug、修改已有代码、在已有文件中添加/删除函数
+- codegen：从零创建全新文件或全新项目
+- refactor：重构、优化、整理已有代码结构
+- doc：写注释、文档、README
+- office：生成Excel/Word/PPT等办公文档
+
 difficulty选项：easy | hard（hard = 跨多文件/逻辑复杂/描述模糊）
+
+注意：只要任务涉及已有文件，就选locator_repair或refactor，不要选codegen。
+codegen仅用于"从零创建"的场景。
 
 格式：{{"expert_type": "...", "task_summary": "10字内", "difficulty": "..."}}
 

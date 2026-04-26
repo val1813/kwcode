@@ -14,6 +14,12 @@ from kaiwu.llm.llama_backend import LLMBackend
 from kaiwu.tools.executor import ToolExecutor
 from kaiwu.tools.ast_utils import extract_symbols, format_symbol_list
 
+try:
+    from kaiwu.ast_engine.locator import ASTLocator
+    _AST_ENGINE_AVAILABLE = True
+except ImportError:
+    _AST_ENGINE_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 LOCATOR_FILE_PROMPT = """你是代码定位专家。根据任务描述，从文件列表中找出最相关的文件。
@@ -54,6 +60,7 @@ class LocatorExpert:
     def __init__(self, llm: LLMBackend, tool_executor: ToolExecutor):
         self.llm = llm
         self.tools = tool_executor
+        self._ast_locator = ASTLocator() if _AST_ENGINE_AVAILABLE else None
 
     def run(self, ctx: TaskContext) -> Optional[dict]:
         """
@@ -72,22 +79,44 @@ class LocatorExpert:
             logger.warning("Locator: no files found")
             return None
 
-        # Phase 2: Function-level location for each file
+        # Phase 2: Function-level location
+        # Try AST call graph first (fast, accurate), fall back to LLM
         all_functions = []
         all_locations = []
         code_snippets = {}
+        ast_used = False
 
-        for fpath in files[:5]:  # Cap at 5 files
+        if self._ast_locator:
+            try:
+                ast_result = self._ast_locator.locate(ctx.project_root, task_desc)
+                ast_funcs = ast_result.get("relevant_functions", [])
+                if ast_funcs:
+                    all_functions = ast_funcs
+                    all_locations = [f"{c['file']}:{c['name']}" for c in ast_result.get("candidates", [])]
+                    # Use AST-located files if they overlap with LLM files
+                    ast_files = ast_result.get("relevant_files", [])
+                    if ast_files:
+                        files = list(dict.fromkeys(files + ast_files))[:5]
+                    ast_used = True
+                    logger.info("AST locator found %d functions", len(ast_funcs))
+            except Exception as e:
+                logger.debug("AST locator failed, falling back to LLM: %s", e)
+
+        if not ast_used:
+            for fpath in files[:5]:
+                content = self.tools.read_file(fpath)
+                if content.startswith("[ERROR]"):
+                    continue
+                funcs, locs = self._locate_functions(fpath, content, task_desc)
+                all_functions.extend(funcs)
+                all_locations.extend(locs)
+
+        # Extract code snippets for Generator
+        for fpath in files[:5]:
             content = self.tools.read_file(fpath)
             if content.startswith("[ERROR]"):
                 continue
-
-            funcs, locs = self._locate_functions(fpath, content, task_desc)
-            all_functions.extend(funcs)
-            all_locations.extend(locs)
-
-            # Extract relevant code snippets (±20 lines around target)
-            snippet = self._extract_snippet(content, funcs)
+            snippet = self._extract_snippet(content, all_functions)
             if snippet:
                 code_snippets[fpath] = snippet
 

@@ -102,7 +102,7 @@ def _build_pipeline(model_path, ollama_url, ollama_model, project_root, verbose)
 
 # ── Single task execution ─────────────────────────────────────
 
-def _run_task(task, gate, orchestrator, memory, project_root, verbose, plan=False):
+def _run_task(task, gate, orchestrator, memory, project_root, verbose, plan=False, no_search=False):
     """Execute a single task through the pipeline. Returns success bool."""
     from kaiwu.core.orchestrator import EXPERT_SEQUENCES
 
@@ -147,6 +147,7 @@ def _run_task(task, gate, orchestrator, memory, project_root, verbose, plan=Fals
         gate_result=gate_result,
         project_root=project_root,
         on_status=status_fn,
+        no_search=no_search,
     )
 
     # Output
@@ -311,6 +312,7 @@ def _repl(model_path, ollama_url, ollama_model, project_root, verbose):
             project_root=project_root,
             verbose=verbose,
             plan=plan_next,
+            no_search=False,
         )
         plan_next = False  # Reset plan flag
 
@@ -329,6 +331,7 @@ def main(
     ollama_url: str = typer.Option("http://localhost:11434", "--ollama-url", help="Ollama服务地址"),
     project_dir: str = typer.Option(".", "--project", "-d", help="项目根目录"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="显示详细日志"),
+    no_search: bool = typer.Option(False, "--no-search", help="禁用搜索增强"),
     do_init: bool = typer.Option(False, "--init", help="初始化KAIWU.md"),
     show_memory: bool = typer.Option(False, "--memory", help="查看项目记忆"),
 ):
@@ -378,7 +381,7 @@ def main(
         verbose=verbose,
     )
 
-    success = _run_task(task, gate, orchestrator, memory, project_root, verbose, plan)
+    success = _run_task(task, gate, orchestrator, memory, project_root, verbose, plan, no_search)
     if not success:
         raise typer.Exit(1)
 
@@ -395,10 +398,21 @@ def cmd_init(
 @app.command("memory")
 def cmd_memory(
     project_dir: str = typer.Option(".", "--project", "-d", help="项目根目录"),
+    reset: bool = typer.Option(False, "--reset", help="清空项目记忆"),
 ):
-    """查看当前项目的 KAIWU.md 记忆。"""
+    """查看或重置当前项目的记忆。"""
     from kaiwu.memory.kaiwu_md import KaiwuMemory
-    content = KaiwuMemory().show(os.path.abspath(project_dir))
+    project_root = os.path.abspath(project_dir)
+    if reset:
+        import shutil
+        kaiwu_dir = os.path.join(project_root, ".kaiwu")
+        if os.path.isdir(kaiwu_dir):
+            shutil.rmtree(kaiwu_dir)
+            console.print(f"  [green]已清空 {kaiwu_dir}[/green]")
+        else:
+            console.print(f"  [dim]没有记忆文件需要清空[/dim]")
+        return
+    content = KaiwuMemory().show(project_root)
     Console().print(Panel(content, title="KAIWU.md", border_style="blue"))
 
 

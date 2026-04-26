@@ -66,6 +66,7 @@ class PipelineOrchestrator:
         gate_result: dict,
         project_root: str,
         on_status=None,
+        no_search: bool = False,
     ) -> dict:
         """
         Execute the expert pipeline.
@@ -123,7 +124,7 @@ class PipelineOrchestrator:
                 ctx.retry_count >= 2
                 or (gate_result.get("difficulty") == "hard" and ctx.retry_count >= 1)
             )
-            if should_search and not ctx.search_triggered:
+            if should_search and not ctx.search_triggered and not no_search:
                 self._emit(on_status, "search", "触发搜索增强...")
                 ctx.search_results = self.search_augmentor.search(ctx)
                 ctx.search_triggered = True

@@ -165,9 +165,10 @@ kaiwu/
 
 - [x] git init + 首次提交
 - [x] 搜索模块 6 步流水线
+- [x] CLI 交互式 REPL（/model /cd /plan /help 等命令）
+- [x] 函数级定位优化（AST 提取候选 → LLM 选择，单函数文件跳过 LLM）
+- [x] StackOverflow 403 修复（StackExchange API）
 - [ ] 拉 qwen3-8b 跑完整验证，确认更大模型的提升幅度
-- [ ] 函数级定位准确率优化（AST 辅助提取 + 更好的 prompt）
-- [ ] CLI 交互式模式（类似 CC 的 REPL）
 - [ ] 多文件修改的端到端验证
 - [ ] codegen 流水线验证（纯新代码生成）
 - [ ] Windows 兼容性完善（路径分隔符、编码等）

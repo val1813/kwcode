@@ -168,7 +168,13 @@ kaiwu/
 - [x] CLI 交互式 REPL（/model /cd /plan /help 等命令）
 - [x] 函数级定位优化（AST 提取候选 → LLM 选择，单函数文件跳过 LLM）
 - [x] StackOverflow 403 修复（StackExchange API）
-- [ ] 拉 qwen3-8b 跑完整验证，确认更大模型的提升幅度
-- [ ] 多文件修改的端到端验证
-- [ ] codegen 流水线验证（纯新代码生成）
+- [x] 符号索引辅助文件定位（跨文件 bug 修复验证通过）
+- [x] 多文件修改 E2E（password leak 跨 models.py+service.py，3/3 测试通过）
+- [x] codegen 流水线验证（纯生成通过，但写到 new_code.py 而非目标文件）
+- [ ] 拉 qwen3-8b 跑完整验证
 - [ ] Windows 兼容性完善（路径分隔符、编码等）
+
+### 已知限制
+
+- Gate 对"在已有文件中添加新函数"可能分类为 codegen 而非 locator_repair，导致跳过 Locator 写到新文件
+- V3 验证脚本的临时目录路径匹配有问题，不影响真实场景

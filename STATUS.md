@@ -274,6 +274,7 @@ kaiwu/
 - [x] 预置专家抽样验证（BugFix 5/5=100%, TestGen gemma4 3/5=60%）
 - [x] CLI补全（--no-search, memory --reset）
 - [x] 中国网络优化（DDG→Bing fallback, httpx代理, ModelScope自动切换, 安装脚本网络探测）
+- [x] CLI命令改名 kaiwu → kwqode（包名不变，入口+显示名+MCP工具名全部更新）
 
 ### 已知限制
 

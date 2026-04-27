@@ -275,6 +275,7 @@ kaiwu/
 - [x] CLI补全（--no-search, memory --reset）
 - [x] 中国网络优化（DDG→Bing fallback, httpx代理, ModelScope自动切换, 安装脚本网络探测）
 - [x] CLI命令改名 kaiwu → kwqode（包名不变，入口+显示名+MCP工具名全部更新）
+- [x] 飞轮端到端验证（5次任务→模式检测→专家生成→Gate2通过→注册→lifecycle new→mature→declining）
 
 ### 已知限制
 

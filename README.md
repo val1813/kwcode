@@ -265,11 +265,41 @@ kwcode --plan "重构数据库连接层"
 ```
 /plan <任务>          计划模式，显示步骤和风险后再执行
 /model qwen3:14b      切换模型
+/api                  API 配置（见下方说明）
 /experts              查看已注册专家
 /memory               查看项目记忆
 /init                 初始化项目规则文件
 /cd <路径>            切换项目目录
 /help                 显示帮助
+```
+
+### 接入任意 API
+
+KWCode 支持任何 OpenAI 兼容的 API，包括 DeepSeek、Qwen 云端、硅基流动、零一万物、Groq 等。
+
+**临时切换**（当前窗口有效，关掉就恢复）：
+
+```
+/api temp https://api.deepseek.com your-api-key
+/api temp https://api.siliconflow.cn/v1 your-api-key
+```
+
+**永久保存**（写入配置文件，下次启动自动使用）：
+
+```
+/api default https://api.deepseek.com your-api-key
+```
+
+**查看当前配置**：
+
+```
+/api show
+```
+
+也可以在启动时通过命令行指定：
+
+```bash
+kwcode --ollama-url https://api.deepseek.com
 ```
 
 ### 项目规则文件

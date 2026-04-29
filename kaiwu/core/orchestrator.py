@@ -84,6 +84,7 @@ class PipelineOrchestrator:
         on_status=None,
         no_search: bool = False,
         skip_checkpoint: bool = False,
+        pre_search_results: str = "",
     ) -> dict:
         """
         Execute the expert pipeline.
@@ -104,6 +105,12 @@ class PipelineOrchestrator:
         )
 
         expert_type = gate_result.get("expert_type", "locator_repair")
+
+        # ── Pre-search results injection (P1-B) ──
+        if pre_search_results:
+            ctx.search_results = pre_search_results
+            ctx.search_triggered = True
+            self._emit(on_status, "search", "已预加载实时数据")
 
         # ── KWCODE.md rules injection ──
         kwcode_sections = load_kwcode_md(project_root)

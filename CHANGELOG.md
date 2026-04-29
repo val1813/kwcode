@@ -4,6 +4,32 @@ All notable changes to KWCode are documented here.
 
 ---
 
+## [1.0.5] - 2026-04-30
+
+### P1+P2：自动任务拆分 + 预搜索 + PCED-Lite
+
+**理论来源：**
+- ExpertRAG (2026)：Gate层搜索决策前移，避免失败后才搜索的浪费
+- PCED (arXiv:2601.08670, 2026)：并行上下文专家解码，180倍TTFT加速
+- Task Decomposition Research (2026)：后台无感知任务分解是区分功能性agent的关键机制
+
+### Added
+
+- **Gate 输出扩展**（向后兼容）：新增 `needs_search`（是否需要实时数据）和 `subtask_hint`（子任务提示）两个字段
+- **Planner.auto_decompose()**：基于 Gate 的 subtask_hint 自动拆分 hard 任务为 DAG
+  - 只在 hint 有 2-5 个子任务时触发
+  - LLM 一次调用确认依赖关系
+  - 失败静默降级为单任务（P1-RED-1）
+- **预搜索**：Gate 判断 `needs_search=true` 时，在 orchestrator.run() 前预加载实时数据
+  - orchestrator.run() 新增 `pre_search_results` 参数
+  - 预搜索结果直接注入 ctx.search_results，跳过失败触发的搜索
+- **PCED-Lite** (`search/pced_lite.py`)：
+  - 对每个搜索结果独立生成答案（ThreadPoolExecutor 并行）
+  - 一致性投票选最终答案（字符级重叠率判断）
+  - FLEX-2：VRAM<6GB 或文档<3 时静默降级到 BM25 拼接
+
+---
+
 ## [1.0.4] - 2026-04-30
 
 ### 代码审查：修复 8 个空架子/竞态/数据错误

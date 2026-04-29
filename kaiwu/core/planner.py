@@ -71,9 +71,10 @@ def estimate_risk(
 
 class Planner:
 
-    def __init__(self, locator, pattern_md_module):
+    def __init__(self, locator, pattern_md_module, llm=None):
         self.locator = locator
         self.pattern_md = pattern_md_module
+        self.llm = llm
 
     def generate_plan(self, ctx: TaskContext) -> list[PlanStep]:
         """Generate execution plan without modifying any files (P1-RED-2)."""
@@ -239,3 +240,101 @@ class Planner:
         except Exception as e:
             logger.debug("[planner] preview failed: %s", e)
         return [], []
+
+    # ── P1-A: 自动任务拆分 ──
+
+    def auto_decompose(
+        self,
+        user_input: str,
+        gate_result: dict,
+        project_root: str,
+    ) -> "list[dict] | None":
+        """
+        基于Gate的subtask_hint自动拆分任务。
+        返回tasks列表或None（不适合拆分时）。
+        P1-RED-1：失败降级None，调用方走单任务。
+        P1-RED-5：LLM调用超时10s。
+        """
+        if not self.llm:
+            return None
+
+        subtask_hint = gate_result.get("subtask_hint", "").strip()
+
+        # 没有hint或hint为空：不拆分
+        if not subtask_hint:
+            return None
+
+        hints = [h.strip() for h in subtask_hint.split(",") if h.strip()]
+
+        # 只有一个子任务hint：不拆分
+        if len(hints) < 2:
+            return None
+
+        # 超过5个hint：可能是错误输出，不拆分
+        if len(hints) > 5:
+            logger.warning("[planner] subtask_hint过多(%d)，跳过自动拆分", len(hints))
+            return None
+
+        # 构建tasks（用LLM确认依赖关系）
+        try:
+            tasks = self._build_dag_from_hints(user_input, hints)
+            return tasks if tasks else None
+        except Exception as e:
+            logger.warning("[planner] 自动拆分失败: %s，走单任务", e)
+            return None  # P1-RED-1
+
+    def _build_dag_from_hints(
+        self,
+        user_input: str,
+        hints: list[str],
+    ) -> "list[dict] | None":
+        """用一次LLM调用把hints转成带依赖关系的DAG。"""
+        import json as _json
+        import re as _re
+
+        hint_list = "\n".join(f"- {h}" for h in hints)
+
+        prompt = f"""用户任务：{user_input}
+
+需要完成的子任务（按顺序）：
+{hint_list}
+
+判断每个子任务是否依赖前面的子任务的输出结果。
+只有当后一个任务必须使用前一个任务的输出数据时，才标记为依赖。
+
+输出JSON数组（严格格式，不要解释）：
+[
+  {{"id": "t1", "input": "子任务1描述", "depends_on": []}},
+  {{"id": "t2", "input": "子任务2描述", "depends_on": ["t1"]}}
+]"""
+
+        raw = self.llm.generate(
+            prompt=prompt,
+            system="你是任务分析专家，只输出JSON，不输出其他内容。",
+            max_tokens=300,
+            temperature=0.0,
+        )
+
+        # 解析JSON
+        json_match = _re.search(r'\[.*?\]', raw, _re.DOTALL)
+        if not json_match:
+            return None
+
+        try:
+            tasks = _json.loads(json_match.group())
+        except _json.JSONDecodeError:
+            return None
+
+        # 验证格式
+        if not isinstance(tasks, list) or len(tasks) < 2:
+            return None
+
+        for t in tasks:
+            if not isinstance(t, dict):
+                return None
+            if not all(k in t for k in ["id", "input", "depends_on"]):
+                return None
+            if not t.get("input", "").strip():
+                return None
+
+        return tasks

@@ -20,6 +20,7 @@
 
 | 日期 | 版本 | 更新内容 |
 |------|------|---------|
+| 04-30 | v1.0.5 | **P1+P2实现**：Gate新增needs_search/subtask_hint字段；hard任务自动拆分(Planner.auto_decompose)；预搜索前移；PCED-Lite多源聚合(arXiv:2601.08670) |
 | 04-30 | v1.0.4 | **代码审查修复8项**：DebugSubagent实例化接入；PromptOptimizer接入投产流程；Checkpoint并行竞态修复；conversation_history存真实LLM输出 |
 | 04-30 | v1.0.3 | **三层上下文架构**：Active(摘要≤2K)+Structured State(Python对象精确传递)+Archive(文件BM25检索)；代码块压缩保护(CTX-RED-1)；paramiko持久SSH会话 |
 | 04-29 | v1.0.2 | **MoE框架补全**：Token预算管控(超限自动终止)；Guardrails护栏(危险命令拦截+敏感文件备份)；执行可观测性(结构化trace)；会话连续性(SESSION.md) |

@@ -4,6 +4,37 @@ All notable changes to KWCode are documented here.
 
 ---
 
+## [1.0.1] - 2026-04-29
+
+### Gate/Loop/路由优化
+
+基于前沿研究优化 Gate 和执行循环，进一步减少 LLM 决策负担。
+
+**理论来源：**
+- Turn-Control Strategies (arXiv:2510.16786)：动态预算比固定预算好 12-24%
+- Hidden Architectural Seam (2026)：分离 Planner 和 Executor 提升 9-15%
+- CodeDelegator (arXiv:2601.14914)：Ephemeral-Persistent State Separation 防止 context 污染
+- Cognition/Devin (2026)：hierarchical delegation 有效，parallel-writer swarms 失败
+- Compiled Execution (MightyBot 2026)：90% agent 工作是路由不是推理，确定性代码优于 LLM 决策
+- ORCH (Frontiers in AI 2026)：EMA-guided 确定性路由，无需额外 LLM 调用
+
+### Added
+
+- **动态重试预算**：根据 Gate 的 difficulty 判断分配重试次数（easy=2, hard=4），不再一刀切
+- **TaskPlanner 自动任务分解** (`core/task_planner.py`)：
+  - 1次 LLM 调用将复合任务拆分为 DAG JSON
+  - 只在 difficulty=hard 且输入>30字时触发（节省 LLM 调用）
+  - 失败降级为单任务（不死循环）
+  - 最多拆分5个子任务
+
+### Fixed
+
+- **Context 污染**：重试时清空 `debug_info`，防止前轮调试噪音干扰下一轮 Generator
+  - 之前：debug_info 累积，第3次重试时 context 里塞了前2次的调试信息
+  - 现在：每次重试前清空，重新采集（Ephemeral State）
+
+---
+
 ## [1.0.0] - 2026-04-29
 
 ### Architecture: 元专家体系定稿

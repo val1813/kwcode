@@ -42,7 +42,8 @@ EXPERT_SEQUENCES = {
 class PipelineOrchestrator:
     """Deterministic expert pipeline orchestrator."""
 
-    MAX_RETRIES = 3  # RED-5: hardcoded, do not change
+    MAX_RETRIES = 3  # Default, overridden by _get_max_retries()
+    _RETRY_BY_DIFFICULTY = {"easy": 2, "hard": 4}  # Dynamic budget
 
     def __init__(
         self,
@@ -182,7 +183,10 @@ class PipelineOrchestrator:
             # P1-RED-3: must notify user on failure
             self._emit(on_status, "warning", "无法创建文件快照，任务失败时需手动还原")
 
-        while ctx.retry_count < self.MAX_RETRIES:
+        # Dynamic retry budget based on task difficulty
+        max_retries = self._get_max_retries(gate_result)
+
+        while ctx.retry_count < max_retries:
             success = self._run_sequence(sequence, ctx, on_status)
 
             # Notify locator of task result (graph stats + incremental update)
@@ -255,6 +259,8 @@ class PipelineOrchestrator:
             ctx.generator_output = None
             ctx.verifier_output = None
             ctx.relevant_code_snippets = {}
+            # Clear ephemeral debug info to prevent context pollution
+            ctx.debug_info = ""
 
         elapsed = time.time() - start_time
 
@@ -285,7 +291,7 @@ class PipelineOrchestrator:
         return {
             "success": False,
             "context": ctx,
-            "error": f"Max retries ({self.MAX_RETRIES}) exceeded",
+            "error": f"Max retries ({max_retries}) exceeded",
             "elapsed": elapsed,
         }
 
@@ -453,6 +459,11 @@ class PipelineOrchestrator:
         if callback:
             callback(stage, detail)
         logger.info("[%s] %s", stage, detail)
+
+    def _get_max_retries(self, gate_result: dict) -> int:
+        """Dynamic retry budget based on task difficulty."""
+        difficulty = gate_result.get("difficulty", "easy")
+        return self._RETRY_BY_DIFFICULTY.get(difficulty, self.MAX_RETRIES)
 
     @staticmethod
     def _needs_realtime_data(user_input: str) -> bool:

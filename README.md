@@ -20,6 +20,7 @@
 
 | 日期 | 版本 | 更新内容 |
 |------|------|---------|
+| 04-30 | v1.0.7 | **系统走查修复5项**：Planner regex bug；TrajectoryCollector.get_by_expert缺失；auto_decompose/预搜索/session_md接入调用链。qwen3:8b真实验证Gate分类5/5正确 |
 | 04-30 | v1.0.6 | **搜索优化**：LLM自动决定site:限定(arxiv/github/stackoverflow等)；query安全过滤(防prompt injection)；零新API零新依赖 |
 | 04-30 | v1.0.5 | **P1+P2实现**：Gate新增needs_search/subtask_hint字段；hard任务自动拆分(Planner.auto_decompose)；预搜索前移；PCED-Lite多源聚合(arXiv:2601.08670) |
 | 04-30 | v1.0.4 | **代码审查修复8项**：DebugSubagent实例化接入；PromptOptimizer接入投产流程；Checkpoint并行竞态修复；conversation_history存真实LLM输出 |

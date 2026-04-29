@@ -4,6 +4,35 @@ All notable changes to KWCode are documented here.
 
 ---
 
+## [1.0.7] - 2026-04-30
+
+### 系统走查：修复 5 个问题（qwen3:8b 真实模型验证）
+
+用本地 qwen3:8b 跑 10 个复合场景端到端测试，发现并修复 5 个问题。
+
+### Fixed
+
+- **Planner regex 非贪婪 bug**：`\[.*?\]` 遇到 `depends_on:[]` 提前终止，auto_decompose 永远返回 None。改为贪婪 `\[.*\]`
+- **TrajectoryCollector.get_by_expert() 缺失**：ab_tester 投产时调用此方法会 AttributeError。新增方法
+- **auto_decompose 未接入 _run_task()**：hard 任务不会自动拆分。现在 difficulty=hard + subtask_hint 非空时自动走 TaskCompiler
+- **预搜索未接入 _run_task()**：Gate 判断 needs_search=true 但 pre_search_results 从未传递。现在预搜索触发后注入 orchestrator
+- **session_md 未接入 REPL 退出**：SESSION.md 从未被写入。现在 REPL 退出时自动保存最近任务摘要
+
+### 验证结果（qwen3:8b 真实输出）
+
+```
+Gate分类准确率: 5/5 场景全部正确
+  - 复合任务 → hard + subtask_hint ✓
+  - 简单bugfix → easy + no search ✓
+  - 需要搜索 → needs_search=true ✓
+
+auto_decompose: 修复后正确拆分（2子任务，依赖关系正确）
+QueryGenerator site限定: LLM自动输出 site:arxiv.org / site:stackoverflow.com
+Token tracking: 3次调用共639 tokens
+```
+
+---
+
 ## [1.0.6] - 2026-04-30
 
 ### 搜索优化：LLM 自动 site: 限定

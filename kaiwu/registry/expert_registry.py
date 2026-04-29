@@ -129,6 +129,31 @@ class ExpertRegistry:
         """Get expert by name."""
         return self.experts.get(name)
 
+    def get_instructions(self, name: str) -> str:
+        """
+        Get Level 2 instructions for an expert (progressive disclosure).
+        For SKILL.md experts: returns the markdown body.
+        For YAML experts: returns system_prompt (backward compat).
+        """
+        expert = self.experts.get(name)
+        if not expert:
+            return ""
+        # SKILL.md format has 'instructions' field
+        if expert.get("_format") == "skill":
+            return expert.get("instructions", "")
+        # YAML format fallback
+        return expert.get("system_prompt", "")
+
+    def get_scripts(self, name: str) -> list[dict]:
+        """
+        Get Level 3 scripts for an expert (progressive disclosure).
+        Returns list of {"name": str, "path": str} or empty list.
+        """
+        expert = self.experts.get(name)
+        if not expert:
+            return []
+        return expert.get("scripts", [])
+
     def save_to_disk(self, expert_name: str, target_dir: str = None):
         """Save expert YAML to disk."""
         import yaml

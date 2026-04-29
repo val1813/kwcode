@@ -56,6 +56,7 @@ class PromptOptimizer:
     ) -> bool:
         """
         Analyze trajectories, generate conclusions, append to expert's system_prompt.
+        Supports both YAML and SKILL.md formats.
         Returns True if optimization was applied.
         """
         expert_def = registry.get(expert_name)
@@ -65,10 +66,10 @@ class PromptOptimizer:
 
         source_path = expert_def.get("_source")
         if not source_path or not os.path.isfile(source_path):
-            logger.warning("[prompt_optimizer] No source YAML for: %s", expert_name)
+            logger.warning("[prompt_optimizer] No source file for: %s", expert_name)
             return False
 
-        current_prompt = expert_def.get("system_prompt", "")
+        current_prompt = expert_def.get("instructions") or expert_def.get("system_prompt", "")
         summary = self._summarize_trajectories(trajectories)
 
         # Call API for analysis
@@ -77,11 +78,13 @@ class PromptOptimizer:
             logger.info("[prompt_optimizer] API returned no rules")
             return False
 
-        # Append rules to system_prompt
-        updated_prompt = current_prompt.rstrip() + "\n\n## 经验规则（自动生成）\n" + new_rules
-
-        # Write back to YAML
-        return self._update_yaml(source_path, updated_prompt, expert_name, registry)
+        # Update based on format
+        fmt = expert_def.get("_format", "yaml")
+        if fmt == "skill":
+            return self._update_skill_md(source_path, new_rules, expert_name, registry)
+        else:
+            updated_prompt = current_prompt.rstrip() + "\n\n## 经验规则（自动生成）\n" + new_rules
+            return self._update_yaml(source_path, updated_prompt, expert_name, registry)
 
     def _call_api(self, task_count: int, summary: str, current_prompt: str) -> Optional[str]:
         """Call Opus/Sonnet API to generate optimization rules."""
@@ -160,4 +163,38 @@ class PromptOptimizer:
             return True
         except Exception as e:
             logger.error("[prompt_optimizer] Failed to update YAML: %s", e)
+            return False
+
+    @staticmethod
+    def _update_skill_md(source_path: str, new_rules: str, expert_name: str,
+                         registry: ExpertRegistry) -> bool:
+        """Append rules to SKILL.md's '## 经验规则' section."""
+        try:
+            with open(source_path, "r", encoding="utf-8") as f:
+                content = f.read()
+
+            rules_header = "## 经验规则（自动生成）"
+            if rules_header in content:
+                # Append after existing header
+                content = content.rstrip() + "\n" + new_rules + "\n"
+            else:
+                # Add new section at end
+                content = content.rstrip() + f"\n\n{rules_header}\n{new_rules}\n"
+
+            with open(source_path, "w", encoding="utf-8") as f:
+                f.write(content)
+
+            # Update in-memory registry
+            expert_def = registry.get(expert_name)
+            if expert_def:
+                # Re-read instructions from updated file
+                from kaiwu.registry.expert_loader import ExpertLoader
+                _, body = ExpertLoader._parse_frontmatter(content)
+                expert_def["instructions"] = body.strip()
+                expert_def["system_prompt"] = body.strip()
+
+            logger.info("[prompt_optimizer] Updated SKILL.md for %s", expert_name)
+            return True
+        except Exception as e:
+            logger.error("[prompt_optimizer] Failed to update SKILL.md: %s", e)
             return False

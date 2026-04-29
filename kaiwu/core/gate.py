@@ -130,7 +130,8 @@ class Gate:
                 # 不一致 → 以通用分类为准，专家system_prompt作为附加知识注入
                 result["expert_name"] = match["name"]
                 result["confidence"] = match["confidence"]
-                result["system_prompt"] = expert.get("system_prompt", "")
+                # Progressive disclosure: use instructions (SKILL.md) or system_prompt (YAML)
+                result["system_prompt"] = expert.get("instructions") or expert.get("system_prompt", "")
 
                 if expert_pipeline == general_pipeline:
                     # 完全一致：走专家路由

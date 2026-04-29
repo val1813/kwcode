@@ -10,9 +10,24 @@
 [![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://python.org)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Mac%20%7C%20Linux-lightgrey.svg)]()
 [![Tests](https://img.shields.io/badge/Tests-311%2F311-brightgreen.svg)]()
-[![Version](https://img.shields.io/badge/Version-1.0.0-blue.svg)]()
+[![Version](https://img.shields.io/badge/Version-1.0.3-blue.svg)]()
 
 </div>
+
+---
+
+## 更新日志
+
+| 日期 | 版本 | 更新内容 |
+|------|------|---------|
+| 04-30 | v1.0.3 | **三层上下文架构**：Active(摘要≤2K)+Structured State(Python对象精确传递)+Archive(文件BM25检索)；代码块压缩保护(CTX-RED-1)；paramiko持久SSH会话 |
+| 04-29 | v1.0.2 | **MoE框架补全**：Token预算管控(超限自动终止)；Guardrails护栏(危险命令拦截+敏感文件备份)；执行可观测性(结构化trace)；会话连续性(SESSION.md) |
+| 04-29 | v1.0.1 | **Gate/Loop优化**：动态重试预算(easy=2/hard=4)；TaskPlanner自动任务分解(1次LLM调用出DAG)；Context污染修复(重试清空debug_info) |
+| 04-29 | v1.0.0 | **架构定稿**：5元专家体系(Locator→Generator→Verifier→Debugger→Reviewer)；15个SKILL.md领域知识渐进式加载；移除Python专家系统 |
+| 04-29 | v0.9.0 | DAG TaskCompiler + /multi命令；Debug Subagent(sys.settrace运行时调试)；Prompt Optimizer(飞轮优化YAML) |
+| 04-29 | v0.7.0 | MVP完成：Gate→专家流水线→Verifier；BM25+AST调用图定位；三阶段重试+Reflection；搜索增强；模型自适应 |
+
+详细变更见 [CHANGELOG.md](CHANGELOG.md)
 
 ---
 

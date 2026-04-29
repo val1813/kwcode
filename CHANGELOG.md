@@ -4,6 +4,21 @@ All notable changes to KWCode are documented here.
 
 ---
 
+## [1.0.6] - 2026-04-30
+
+### 搜索优化：LLM 自动 site: 限定
+
+**理论来源：** LLM 已经在生成 query，直接让它顺便决定 site: 限定，零新 API，零新依赖。
+
+### Added
+
+- **QueryGenerator 智能 site 限定**：第一条 query LLM 自动判断去哪个站点（arxiv/github/stackoverflow/pypi 等），后续 query 不加限定做广度搜索
+- **_clean_query() 安全过滤**：拦截 prompt injection 尝试（ignore previous/[INST] 等）
+- **realtime intent**：预搜索场景专用意图类型
+- **QueryGenerator 兼容纯字符串调用**：不强制要求 TaskContext，预搜索可直接传 string
+
+---
+
 ## [1.0.5] - 2026-04-30
 
 ### P1+P2：自动任务拆分 + 预搜索 + PCED-Lite

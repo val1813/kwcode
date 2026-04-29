@@ -159,6 +159,7 @@ class TaskCompiler:
             gate_result=gate_result,
             project_root=self.project_root,
             on_status=on_status,
+            skip_checkpoint=True,  # 问题4修复：多任务时跳过子任务级checkpoint，避免并行竞态
         )
 
     @staticmethod

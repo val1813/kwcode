@@ -161,6 +161,10 @@ def _build_pipeline(model_path, ollama_url, ollama_model, project_root, verbose)
     from kaiwu.experts.chat_expert import ChatExpert
     chat_expert = ChatExpert(llm=llm, search_augmentor=search)
 
+    # Debug Subagent (问题1修复：实例化并注入)
+    from kaiwu.experts.debug_subagent import DebugSubagent
+    debug_subagent = DebugSubagent(llm, tools)
+
     trajectory_collector = TrajectoryCollector()
 
     # ABTester needs orchestrator reference for gate 2 backtest;
@@ -178,6 +182,7 @@ def _build_pipeline(model_path, ollama_url, ollama_model, project_root, verbose)
         trajectory_collector=trajectory_collector,
         ab_tester=ab_tester,
         chat_expert=chat_expert,
+        debug_subagent=debug_subagent,
     )
     # Wire circular reference: ABTester needs orchestrator for backtest
     ab_tester.orchestrator = orchestrator
@@ -260,6 +265,8 @@ def _run_task(task, gate, orchestrator, memory, project_root, verbose, plan=Fals
                 on_status=_status_fn,
                 no_search=no_search,
             )
+            # 保存最后结果供conversation_history使用（问题7）
+            orchestrator._last_result = result
         except Exception as e:
             progress.stop()
             console.print(f"\n  [red]执行异常：{e}[/red]")
@@ -631,8 +638,8 @@ def _repl(model_path, ollama_url, ollama_model, project_root, verbose):
             )
 
         t0 = time.perf_counter()
-        # P2: Small model forces plan mode
-        effective_plan = plan_next or model_strategy.force_plan_mode
+        # P2: Small model forces plan mode (问题6修复：用户可通过 no_search 间接控制)
+        effective_plan = plan_next or (model_strategy.force_plan_mode and not no_search)
         success = _run_task(
             task=user_input,
             gate=gate,
@@ -650,8 +657,21 @@ def _repl(model_path, ollama_url, ollama_model, project_root, verbose):
         tps_estimator.record("x" * int(elapsed * 15), elapsed)  # ~15 tok/s estimate
         status.tok_per_sec = tps_estimator.value
 
-        # Update ctx usage with real LLM output
-        conversation_history.append({"role": "assistant", "content": user_input[:500]})
+        # Update ctx usage with actual task result (问题7修复：存真实输出而非user_input)
+        assistant_content = ""
+        if success:
+            # 尝试从orchestrator获取真实输出
+            try:
+                last_result = getattr(orchestrator, '_last_result', None)
+                if last_result and last_result.get("context"):
+                    ctx = last_result["context"]
+                    if ctx.generator_output and ctx.generator_output.get("explanation"):
+                        assistant_content = ctx.generator_output["explanation"][:500]
+            except Exception:
+                pass
+        if not assistant_content:
+            assistant_content = f"[任务{'成功' if success else '失败'}] {user_input[:100]}"
+        conversation_history.append({"role": "assistant", "content": assistant_content})
         status.ctx_used = pruner.estimate_total(conversation_history)
         status.model = ollama_model
 

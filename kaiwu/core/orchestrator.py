@@ -83,6 +83,7 @@ class PipelineOrchestrator:
         project_root: str,
         on_status=None,
         no_search: bool = False,
+        skip_checkpoint: bool = False,
     ) -> dict:
         """
         Execute the expert pipeline.
@@ -176,12 +177,13 @@ class PipelineOrchestrator:
             if ctx.search_results:
                 self._emit(on_status, "search_done", f"搜索完成，注入{len(ctx.search_results)}字参考信息")
 
-        # ── Checkpoint: snapshot before execution ──
+        # ── Checkpoint: snapshot before execution (skip in multi-task to avoid race) ──
         checkpoint = Checkpoint(project_root)
-        checkpoint_saved = checkpoint.save()
-        if not checkpoint_saved:
-            # P1-RED-3: must notify user on failure
-            self._emit(on_status, "warning", "无法创建文件快照，任务失败时需手动还原")
+        checkpoint_saved = False
+        if not skip_checkpoint:
+            checkpoint_saved = checkpoint.save()
+            if not checkpoint_saved:
+                self._emit(on_status, "warning", "无法创建文件快照，任务失败时需手动还原")
 
         # Dynamic retry budget based on task difficulty
         max_retries = self._get_max_retries(gate_result)

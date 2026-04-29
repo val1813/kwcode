@@ -288,6 +288,18 @@ class ABTester:
                 )
             except Exception as e:
                 logger.debug("Flywheel notification failed (non-blocking): %s", e)
+
+            # 问题2修复：投产后触发 Prompt Optimization
+            try:
+                from kaiwu.cli.onboarding import load_config
+                cfg = load_config().get("default", {})
+                anthropic_key = cfg.get("anthropic_api_key", "")
+                if anthropic_key:
+                    trajectories = self.collector.get_by_expert(expert_name) if self.collector else []
+                    self.run_prompt_optimization(expert_name, trajectories, anthropic_key)
+            except Exception as e:
+                logger.debug("Post-graduation prompt optimization failed (non-blocking): %s", e)
+
             return "graduated"
 
         # Failed gate 3 -> archive

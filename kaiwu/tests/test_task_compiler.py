@@ -18,7 +18,7 @@ def _make_mock_orchestrator():
     """Create a mock orchestrator that returns success with realistic context."""
     orch = MagicMock()
 
-    def mock_run(user_input, gate_result, project_root, on_status=None, no_search=False):
+    def mock_run(user_input, gate_result, project_root, on_status=None, no_search=False, skip_checkpoint=False):
         # Simulate some work
         time.sleep(0.05)
         ctx = MagicMock()

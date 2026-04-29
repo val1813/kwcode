@@ -4,6 +4,37 @@ All notable changes to KWCode are documented here.
 
 ---
 
+## [1.0.3] - 2026-04-30
+
+### 上下文优化 + SSH 持久会话
+
+**理论来源：**
+- Letta (2026)：Active+Archive 分层记忆架构
+- GCC State Passing：结构化状态传递，不通过对话历史
+- SWE-Pruner：代码块保护原则，代码内容禁止被压缩
+- Claude Code：敏感文件备份而非阻止写入
+
+### Added
+
+- **三层上下文架构** (`core/context.py` + `core/context_pruner.py`)：
+  - Layer 1 (Active)：文字摘要，Gate/Generator 看到的（≤2K tokens，可压缩）
+  - Layer 2 (Structured State)：Python 对象（subtask_results, code_snippets），精确传递不压缩
+  - Layer 3 (Archive)：持久化文件（SESSION.md, PATTERN.md），BM25 按需检索
+  - 新增字段：`subtask_results`、`current_task_id`、`upstream_summary`
+
+- **代码块保护** (CTX-RED-1)：ContextPruner 压缩时检测 ``` 代码块，保留代码原文不做关键词化
+
+- **持久 SSH 会话** (`tools/ssh_session.py`)：
+  - paramiko 实现，connect 一次后多次 exec
+  - 集成到 ToolExecutor：`ssh_connect/ssh_exec/ssh_upload/ssh_download/ssh_close`
+  - Guardrails 同样适用于远程命令
+
+### Fixed
+
+- 敏感文件保护改为备份模式（.bak）而非阻止写入，与 Claude Code 行为一致
+
+---
+
 ## [1.0.2] - 2026-04-29
 
 ### MoE 框架补全：4 个缺失主部件

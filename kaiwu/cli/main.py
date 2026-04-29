@@ -212,6 +212,29 @@ def _run_task(task, gate, orchestrator, memory, project_root, verbose, plan=Fals
     et = gate_result.get("expert_type", "chat")
     diff = gate_result.get("difficulty", "easy")
 
+    # ── P1-A: hard任务自动拆分 ──
+    _SKIP_DECOMPOSE_TYPES = {"chat", "office"}
+    if diff == "hard" and et not in _SKIP_DECOMPOSE_TYPES:
+        try:
+            from kaiwu.core.planner import Planner
+            from kaiwu.memory import pattern_md
+            planner = Planner(
+                locator=orchestrator.locator,
+                pattern_md_module=pattern_md,
+                llm=orchestrator.generator.llm,
+            )
+            auto_tasks = planner.auto_decompose(task, gate_result, project_root)
+            if auto_tasks and len(auto_tasks) > 1:
+                console.print(f"\n  [dim]检测到复杂任务，自动拆分为 {len(auto_tasks)} 个子任务[/dim]")
+                for t in auto_tasks:
+                    dep = f" → 依赖{t['depends_on']}" if t["depends_on"] else ""
+                    console.print(f"  [dim]  {t['id']}: {t['input'][:50]}{dep}[/dim]")
+                console.print()
+                _handle_multi_with_tasks(auto_tasks, gate, orchestrator, project_root, console)
+                return True
+        except Exception as e:
+            logger.warning("[main] 自动拆分异常: %s，走单任务", e)
+
     # Plan mode (only for high-risk tasks)
     _SKIP_PLAN_TYPES = {"chat", "office"}
     should_plan = plan and et not in _SKIP_PLAN_TYPES
@@ -258,12 +281,29 @@ def _run_task(task, gate, orchestrator, memory, project_root, verbose, plan=Fals
             progress.update(spin, description=_spinner_state["description"])
 
         try:
+            # P1-B: 预搜索（Gate判断needs_search时）
+            pre_search = ""
+            if gate_result.get("needs_search") and not no_search and et not in ("chat", "office"):
+                try:
+                    from kaiwu.search.query_generator import QueryGenerator
+                    from kaiwu.search.duckduckgo import search as ddg_search
+                    qg = QueryGenerator(llm=orchestrator.generator.llm)
+                    search_query = qg.generate(task, intent="realtime")
+                    if search_query:
+                        results = ddg_search(search_query[0], max_results=3)
+                        if results:
+                            snippets = [f"[{r.get('title','')}] {r.get('snippet','')}" for r in results[:3] if r.get('snippet')]
+                            pre_search = "\n".join(snippets)[:2000]
+                except Exception as e:
+                    logger.debug("[main] 预搜索失败: %s", e)
+
             result = orchestrator.run(
                 user_input=task,
                 gate_result=gate_result,
                 project_root=project_root,
                 on_status=_status_fn,
                 no_search=no_search,
+                pre_search_results=pre_search,
             )
             # 保存最后结果供conversation_history使用（问题7）
             orchestrator._last_result = result
@@ -678,10 +718,47 @@ def _repl(model_path, ollama_url, ollama_model, project_root, verbose):
     # Cleanup
     vram_watcher.stop()
 
+    # P4: 会话连续性 — 保存SESSION.md
+    try:
+        from kaiwu.memory.session_md import save_session
+        tasks_done = []
+        for msg in conversation_history:
+            if msg.get("role") == "assistant":
+                content = msg.get("content", "")
+                success = not content.startswith("[任务失败")
+                tasks_done.append({"input": content[:50], "success": success, "files": [], "elapsed": 0})
+        if tasks_done:
+            save_session(project_root, tasks_done[-10:])
+    except Exception:
+        pass
+
 
 def _escape_html(text: str) -> str:
     """Escape HTML special chars for prompt_toolkit HTML."""
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _handle_multi_with_tasks(tasks, gate, orchestrator, project_root, console):
+    """复用TaskCompiler执行已解析的tasks（供auto_decompose调用）。"""
+    from kaiwu.core.task_compiler import TaskCompiler
+    from rich.progress import Progress, SpinnerColumn, TextColumn
+
+    compiler = TaskCompiler(orchestrator=orchestrator, gate=gate, project_root=project_root)
+
+    with Progress(SpinnerColumn(), TextColumn("{task.description}"),
+                  console=console, transient=True) as progress:
+        ptask = progress.add_task("执行多任务...", total=None)
+
+        def _on_status(stage, detail):
+            progress.update(ptask, description=detail[:60])
+
+        result = compiler.compile_and_run(tasks, on_status=_on_status)
+
+    if result["success"]:
+        console.print(f"  [bold green]✓ 完成[/bold green] ({result['elapsed']:.1f}s)")
+    else:
+        failed = [tid for tid, r in result["results"].items() if not r["success"]]
+        console.print(f"  [bold yellow]部分完成[/bold yellow] — 失败: {', '.join(failed)}")
 
 
 # ── /multi command handler ───────────────────────────────────

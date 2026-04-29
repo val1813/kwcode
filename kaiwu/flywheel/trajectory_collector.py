@@ -124,3 +124,10 @@ class TrajectoryCollector:
             except Exception as e:
                 logger.warning("Failed to load trajectory %s: %s", fname, e)
         return results
+
+    def get_by_expert(self, expert_name: str) -> list[TaskTrajectory]:
+        """Load trajectories where the matched expert_name matches."""
+        return [
+            t for t in self._load_all()
+            if t.gate_result.get("expert_name") == expert_name
+        ]

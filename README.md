@@ -432,18 +432,30 @@ kaiwu/
 | **Reflexion** | Shinn et al., NeurIPS 2023 | 失败模式持久化+重试时注入，KWCode 的 REFLECTION.md 直接实现 |
 | **AgentCoder** | Huang et al., EMNLP 2023 | 多专家分工验证，KWCode 的 Gate→专家流水线参考此分工模式 |
 | **Agent Psychometrics** | arXiv:2604.00594, 2026 | 任务特征预测 agent 成功率，KWCode 的模型能力自适应参考此研究 |
+| **TRUSTEE** | 2026 | 8B 模型可靠 tool calling 验证，KWCode 的 Gate 设计参考 |
 
 ### 借鉴的开源项目
 
 | 项目 | 借鉴点 |
 |------|--------|
-| **Claude Code** (Anthropic) | CLAUDE.md 项目规则文件 → KWCode 的 KWCODE.md；Checkpoint 文件快照机制 |
-| **Hermes** (Anthropic) | REPL 交互模式、/plan 计划模式的交互设计 |
-| **OpenCode** | 本地模型 coding agent 的产品形态参考 |
+| **Claude Code** (Anthropic) | CLAUDE.md 项目规则文件 → KWCode 的 KWCODE.md；Checkpoint 文件快照机制；/plan 计划模式 |
+| **Hermes** (Anthropic) | REPL 交互模式、MEMORY.md 记忆系统的交互设计 |
+| **OpenHands V1** (All Hands AI) | Agent delegation 任务分解思路、Context Condensation 上下文压缩、LLM-based 集成测试回检 |
+| **OpenCode** | 本地模型 coding agent 的产品形态参考；早期版本曾作为执行层底座探索 |
 | **SearXNG** | 零 API key 的本地搜索引擎，KWCode 集成为搜索后端 |
 | **rank-bm25** | BM25Plus 算法实现，用于代码定位和搜索结果重排 |
 | **tree-sitter** | 多语言 AST 解析，用于调用图构建 |
 | **sentence-transformers** | Cross-Encoder 模型，用于搜索结果精排（可选依赖） |
+
+### 设计决策的来源
+
+以下关键设计决策来自项目早期的架构讨论和实验：
+
+- **不用 ReAct 循环，用确定性流水线**：小模型在 ReAct 循环里容易失控，确定性流水线每步输入输出格式固定，LLM 只在 Generator 出现一次
+- **专家是 YAML 知识载体，不是 Python 类**：早期实验过 Python 专家（ExpertBase 继承体系），发现把领域知识和执行逻辑混在一起方向错误，回退到纯 YAML
+- **不用 LoRA 训练专家**：早期实验证明 LoRA 效果差、换模型要重训，改为 system_prompt 自动进化
+- **任务拆分不枚举模板**：参考 OpenHands V1 的 agent delegation，复杂任务让 LLM 一次性输出 DAG JSON，失败退化为单任务
+- **专家约束越严格越好**：不是教 8B 模型做什么，是限制它只能在什么范围内做。约束越严格，犯错空间越小
 
 ---
 

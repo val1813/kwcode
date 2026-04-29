@@ -7,36 +7,42 @@
 
 ---
 
-## 当前状态：v0.8.0 (2026-04-29)
+## 当前状态：v0.9.0 (2026-04-29)
 
-全部功能已实现，265/265 单元/回归测试全绿。自我强化专家系统已集成。
+292/292 测试全绿。Python专家系统已移除，改为正确方向。
 
-### v0.8.0 新增：自我强化专家系统
+### v0.9.0 新增
 
-**Python专家升级**
-- ExpertBase基类（`experts/base.py`）：_locate/_generate/_verify三阶段helper
-- BugFixExpert Python版本（`builtin_experts/bugfix_expert.py`）：TRIGGER+run()+test()三段式
-- Registry支持Python专家加载，Python优先级高于同名yaml
-- SE-RED-1保护：TRIGGER和test()不可被LLM修改
+**DAG 任务编译器（TaskCompiler）**
+- `core/task_compiler.py`：轻量 DAG 调度器，ThreadPoolExecutor + Kahn 拓扑排序
+- 支持串行（依赖链）和并行（独立任务）混合执行
+- 依赖上下文注入：前置任务结果自动追加到后续任务输入
+- 零新依赖，12 个测试覆盖（串行/并行/菱形DAG/环检测）
 
-**SelfImprovingOptimizer（飞轮自我强化）**
-- 积累5次成功轨迹 → Opus/Sonnet API分析 → 生成新run()代码
-- 三道门验证：语法检查 → 后端测试(test()) → 回测
-- SE-RED-3：修改前备份，失败自动回滚
-- SE-RED-4：离线执行，不在用户任务流程中
-- FLEX-1：无API key时跳过，基本功能不受影响
+**Debug Subagent（运行时调试子代理）**
+- `experts/debug_subagent.py`：基于 Debug2Fix 论文（Microsoft 2026）
+- verifier 失败后用 sys.settrace 非侵入式捕获目标行变量值
+- LLM 决定调试策略（断点位置+变量列表），fallback 到 pytest --tb=long
+- 调试结果注入 generator retry prompt，让重试拿到真实运行时数据
+- 15 个测试覆盖
 
-**Reflexion持久化**
-- 任务完成后（成功/失败）自动写入REFLECTION.md
-- SE-RED-5：结构化格式（日期+摘要+根因/注意）
-- /plan时自动读取历史Reflection作为风险提示
-- 每section最多20条，防止无限增长
+**Prompt Optimizer（飞轮优化 YAML system_prompt）**
+- `flywheel/prompt_optimizer.py`：分析成功轨迹 → Opus/Sonnet API 生成经验规则
+- 规则追加到专家 YAML 的 system_prompt（`## 经验规则（自动生成）`）
+- 替代已删除的 Python 代码优化器，方向正确：优化知识而非代码
 
-**Cross-Encoder搜索重排**
-- `search/reranker.py`：cross-encoder/ms-marco-MiniLM-L-6-v2（82MB CPU）
-- 集成到搜索管道：BM25重排后再Cross-Encoder精排
-- FLEX-2：sentence-transformers未安装或CPU慢(>2s)时自动跳过
-- 可选依赖：`pip install kwcode[rerank]`
+**Reflexion 持久化**（保留）
+- REFLECTION.md 结构化写入 + /plan 风险提示注入
+
+**Cross-Encoder 搜索重排**（保留）
+- BM25 后追加 Cross-Encoder 精排，FLEX-2 自动降级
+
+### v0.8.0 已移除（方向错误）
+
+- ~~ExpertBase 继承体系~~（Python专家把知识和执行逻辑混在一起）
+- ~~BugFixExpert.py~~（应该是 YAML 知识载体，不是 Python 类）
+- ~~SelfImprovingOptimizer~~（优化 Python 代码 → 改为优化 YAML prompt）
+- ~~Registry Python 专家加载~~（回退到纯 YAML）
 
 ### 已完成功能清单
 

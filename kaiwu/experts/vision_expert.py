@@ -16,6 +16,8 @@ from typing import Optional
 from kaiwu.core.context import TaskContext
 
 logger = logging.getLogger(__name__)
+MAX_IMAGE_BYTES = 20 * 1024 * 1024
+MAX_IMAGE_COUNT = 20
 
 # ── Vision system prompts ──────────────────────────────────────────
 
@@ -92,21 +94,31 @@ class VisionExpert:
         Returns:
             dict: 包含 success, output, metadata
         """
+        image_paths = list(getattr(ctx, 'image_paths', []) or [])
         image_path = getattr(ctx, 'image_path', None)
+        if not image_paths and image_path:
+            image_paths = [image_path]
         
-        if not image_path:
+        if not image_paths:
             return {
                 "success": False,
                 "output": "错误：未提供图片路径",
                 "metadata": {"error": "no_image_path"}
             }
-        
-        # 验证图片文件
-        if not self._validate_image(image_path):
+        if len(image_paths) > MAX_IMAGE_COUNT:
             return {
                 "success": False,
-                "output": f"错误：图片文件不存在或格式不支持: {image_path}",
-                "metadata": {"error": "invalid_image"}
+                "output": f"错误：一次最多支持 {MAX_IMAGE_COUNT} 张图片",
+                "metadata": {"error": "too_many_images", "count": len(image_paths)}
+            }
+        
+        # 验证图片文件
+        invalid_paths = [path for path in image_paths if not self._validate_image(path)]
+        if invalid_paths:
+            return {
+                "success": False,
+                "output": f"错误：图片文件不存在、过大或格式不支持: {', '.join(invalid_paths)}",
+                "metadata": {"error": "invalid_image", "paths": invalid_paths}
             }
         
         # 分析用户意图
@@ -114,14 +126,19 @@ class VisionExpert:
         is_codegen_task = self._is_codegen_task(user_input)
         
         try:
-            # 编码图片
-            image_base64 = self._encode_image(image_path)
-            media_type = self._media_type_for_path(image_path, image_base64)
+            images = []
+            for path in image_paths:
+                image_base64 = self._encode_image(path)
+                images.append({
+                    "path": path,
+                    "base64": image_base64,
+                    "media_type": self._media_type_for_path(path, image_base64),
+                })
             
             if is_codegen_task:
-                return self._run_codegen(ctx, image_base64, image_path, media_type)
+                return self._run_codegen(ctx, images)
             else:
-                return self._run_analysis(ctx, image_base64, image_path, media_type)
+                return self._run_analysis(ctx, images)
                 
         except Exception as e:
             logger.error(f"VisionExpert error: {e}")
@@ -136,18 +153,26 @@ class VisionExpert:
         path = Path(image_path).expanduser()
         if not path.exists() or not path.is_file():
             return False
+        if path.stat().st_size > MAX_IMAGE_BYTES:
+            return False
         
-        # 支持的图片格式
-        supported_formats = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp'}
-        return path.suffix.lower() in supported_formats
+        try:
+            with path.open("rb") as f:
+                return self._media_type_for_bytes(f.read(16)) is not None
+        except OSError:
+            return False
 
     def _encode_image(self, image_path: str) -> str:
         """将图片编码为base64"""
-        with open(image_path, "rb") as f:
+        with open(Path(image_path).expanduser(), "rb") as f:
             return base64.b64encode(f.read()).decode('utf-8')
 
     def _media_type_for_path(self, image_path: str, image_base64: str) -> str:
         """Return a MIME type compatible with common vision APIs."""
+        media_type = self._media_type_for_base64(image_base64)
+        if media_type:
+            return media_type
+
         suffix_map = {
             ".png": "image/png",
             ".jpg": "image/jpeg",
@@ -160,14 +185,36 @@ class VisionExpert:
         if suffix in suffix_map:
             return suffix_map[suffix]
 
+        return "image/png"
+
+    @staticmethod
+    def _media_type_for_base64(image_base64: str) -> Optional[str]:
         raw_sample = image_base64[:20]
+        if raw_sample.startswith("iVBORw0KGgo"):
+            return "image/png"
         if raw_sample.startswith("/9j"):
             return "image/jpeg"
         if raw_sample.startswith("R0lGOD"):
             return "image/gif"
         if raw_sample.startswith("UklGR"):
             return "image/webp"
-        return "image/png"
+        if raw_sample.startswith("Qk"):
+            return "image/bmp"
+        return None
+
+    @staticmethod
+    def _media_type_for_bytes(raw: bytes) -> Optional[str]:
+        if raw.startswith(b"\x89PNG\r\n\x1a\n"):
+            return "image/png"
+        if raw.startswith(b"\xff\xd8\xff"):
+            return "image/jpeg"
+        if raw.startswith((b"GIF87a", b"GIF89a")):
+            return "image/gif"
+        if raw.startswith(b"RIFF") and raw[8:12] == b"WEBP":
+            return "image/webp"
+        if raw.startswith(b"BM"):
+            return "image/bmp"
+        return None
 
     def _is_codegen_task(self, user_input: str) -> bool:
         """判断是否为代码生成任务"""
@@ -182,23 +229,23 @@ class VisionExpert:
         user_input_lower = user_input.lower()
         return any(kw in user_input_lower for kw in codegen_keywords)
 
-    def _run_analysis(self, ctx: TaskContext, image_base64: str, image_path: str, media_type: str) -> dict:
+    def _run_analysis(self, ctx: TaskContext, images: list[dict]) -> dict:
         """运行图片分析"""
-        logger.info(f"[vision] 分析图片: {image_path}")
+        logger.info("[vision] 分析图片: %s", ", ".join(img["path"] for img in images))
         
         # 构建提示词
         user_input = ctx.user_input.strip()
+        image_count = len(images)
         if user_input:
-            prompt = f"用户上传了一张图片并说：{user_input}\n\n请分析这张图片。"
+            prompt = f"用户上传了{image_count}张图片并说：{user_input}\n\n请结合所有图片进行分析。"
         else:
-            prompt = "用户上传了一张图片，请分析其内容。"
+            prompt = f"用户上传了{image_count}张图片，请分析其内容。"
         
         # 调用Vision LLM
         response = self._call_vision_llm(
             system_prompt=VISION_ANALYSIS_SYSTEM,
             user_prompt=prompt,
-            image_base64=image_base64,
-            media_type=media_type,
+            images=images,
         )
         
         return {
@@ -206,26 +253,27 @@ class VisionExpert:
             "output": response,
             "metadata": {
                 "type": "vision_analysis",
-                "image_path": image_path,
+                "image_paths": [img["path"] for img in images],
+                "image_count": image_count,
                 "has_user_task": bool(user_input)
             }
         }
 
-    def _run_codegen(self, ctx: TaskContext, image_base64: str, image_path: str, media_type: str) -> dict:
+    def _run_codegen(self, ctx: TaskContext, images: list[dict]) -> dict:
         """运行基于图片的代码生成"""
-        logger.info(f"[vision] 基于图片生成代码: {image_path}")
+        logger.info("[vision] 基于图片生成代码: %s", ", ".join(img["path"] for img in images))
         
         user_input = ctx.user_input.strip()
+        image_count = len(images)
         
         # 构建提示词
-        prompt = f"用户上传了一张图片并要求：{user_input}\n\n请根据图片内容生成代码。"
+        prompt = f"用户上传了{image_count}张图片并要求：{user_input}\n\n请结合所有图片内容生成代码。"
         
         # 调用Vision LLM
         response = self._call_vision_llm(
             system_prompt=VISION_CODEGEN_SYSTEM,
             user_prompt=prompt,
-            image_base64=image_base64,
-            media_type=media_type,
+            images=images,
         )
         
         # 尝试执行生成的代码（如果用户要求）
@@ -239,30 +287,41 @@ class VisionExpert:
             "output": response,
             "metadata": {
                 "type": "vision_codegen",
-                "image_path": image_path,
+                "image_paths": [img["path"] for img in images],
+                "image_count": image_count,
                 "task": user_input
             }
         }
 
-    def _call_vision_llm(self, system_prompt: str, user_prompt: str, image_base64: str, media_type: str) -> str:
+    def _call_vision_llm(self, system_prompt: str, user_prompt: str, images: list[dict]) -> str:
         """调用支持Vision的LLM (Anthropic Messages API 格式)
 
         优先使用 self.llm (如果支持 vision)，否则回退到环境变量配置的 API：
-          KWCODE_VISION_API_URL   - API endpoint (默认 Anthropic 格式)
-          KWCODE_VISION_API_KEY   - API key
-          KWCODE_VISION_MODEL     - 模型名 (默认 mimo-v2-omni)
+          KWCODE_VISION_API_URL   - API endpoint (Anthropic Messages API 格式，必填)
+          KWCODE_VISION_API_KEY   - API key (必填)
+          KWCODE_VISION_MODEL     - 模型名 (必填，需支持多模态，如 mimo-v2-omni)
         """
         # 尝试通过 self.llm 直接调用（如果后端支持多模态）
         if self.llm is not None:
             try:
-                return self._try_llm_vision(system_prompt, user_prompt, image_base64, media_type)
+                return self._try_llm_vision(system_prompt, user_prompt, images)
             except Exception as e:
                 logger.debug(f"[vision] self.llm 不支持 vision，回退到 API: {e}")
 
-        # 回退：直接调用 Anthropic Messages API
-        return self._call_anthropic_vision(system_prompt, user_prompt, image_base64, media_type)
+        if not self._vision_api_configured():
+            raise RuntimeError(
+                "本地模型不支持图片输入，且未显式配置Vision API；"
+                "请设置 KWCODE_VISION_API_URL 或 KWCODE_VISION_API_KEY 后重试"
+            )
 
-    def _try_llm_vision(self, system_prompt: str, user_prompt: str, image_base64: str, media_type: str) -> str:
+        # 回退：直接调用 Anthropic Messages API
+        return self._call_anthropic_vision(system_prompt, user_prompt, images)
+
+    @staticmethod
+    def _vision_api_configured() -> bool:
+        return bool(os.environ.get("KWCODE_VISION_API_URL") or os.environ.get("KWCODE_VISION_API_KEY"))
+
+    def _try_llm_vision(self, system_prompt: str, user_prompt: str, images: list[dict]) -> str:
         """尝试通过 self.llm 的 chat 接口发送多模态请求"""
         # LLMBackend supports two HTTP styles. Native llama.cpp cannot consume
         # image payloads here, so force the documented vision API fallback.
@@ -277,38 +336,62 @@ class VisionExpert:
                 {
                     "role": "user",
                     "content": user_prompt,
-                    "images": [image_base64],
+                    "images": [img["base64"] for img in images],
                 },
             ]
             return self.llm.chat(messages, max_tokens=2048)
 
+        content = [{"type": "text", "text": user_prompt}]
+        content.extend(
+            {
+                "type": "image_url",
+                "image_url": {"url": f"data:{img['media_type']};base64,{img['base64']}"},
+            }
+            for img in images
+        )
         messages = [
             {"role": "system", "content": system_prompt},
             {
                 "role": "user",
-                "content": [
-                    {"type": "text", "text": user_prompt},
-                    {
-                        "type": "image_url",
-                        "image_url": {"url": f"data:{media_type};base64,{image_base64}"},
-                    },
-                ],
+                "content": content,
             },
         ]
         return self.llm.chat(messages, max_tokens=2048)
 
-    def _call_anthropic_vision(self, system_prompt: str, user_prompt: str, image_base64: str, media_type: str) -> str:
+    def _call_anthropic_vision(self, system_prompt: str, user_prompt: str, images: list[dict]) -> str:
         """直接调用 Anthropic Messages API（兼容 xiaomimimo 等代理）"""
         import json as _json
         import urllib.request
         import urllib.error
 
-        api_url = os.environ.get(
-            "KWCODE_VISION_API_URL",
-            "https://token-plan-cn.xiaomimimo.com/anthropic/v1/messages",
-        )
+        api_url = os.environ.get("KWCODE_VISION_API_URL", "")
         api_key = os.environ.get("KWCODE_VISION_API_KEY", "")
-        model = os.environ.get("KWCODE_VISION_MODEL", "mimo-v2-omni")
+        model = os.environ.get("KWCODE_VISION_MODEL", "")
+
+        if not api_url or not model:
+            raise RuntimeError(
+                "Vision API 未配置。请设置环境变量：\n"
+                "  export KWCODE_VISION_API_URL=<Anthropic Messages API endpoint>\n"
+                "  export KWCODE_VISION_API_KEY=<your api key>\n"
+                "  export KWCODE_VISION_MODEL=<multimodal model name>\n"
+                "示例：\n"
+                "  export KWCODE_VISION_API_URL=https://your-provider.com/v1/messages\n"
+                "  export KWCODE_VISION_API_KEY=sk-xxx\n"
+                "  export KWCODE_VISION_MODEL=gpt-4o"
+            )
+
+        content = [
+            {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": img["media_type"],
+                    "data": img["base64"],
+                },
+            }
+            for img in images
+        ]
+        content.append({"type": "text", "text": user_prompt})
 
         payload = {
             "model": model,
@@ -317,17 +400,7 @@ class VisionExpert:
             "messages": [
                 {
                     "role": "user",
-                    "content": [
-                        {
-                            "type": "image",
-                            "source": {
-                                "type": "base64",
-                                "media_type": media_type,
-                                "data": image_base64,
-                            },
-                        },
-                        {"type": "text", "text": user_prompt},
-                    ],
+                    "content": content,
                 }
             ],
         }
@@ -392,8 +465,12 @@ class VisionExpert:
             temp_file.write_text(code, encoding='utf-8')
             
             # 执行代码
-            result = self.tools.run_bash(f"python {shlex.quote(str(temp_file))}")
-            return result.get("output", "")
+            stdout, stderr, returncode = self.tools.run_bash(f"python {shlex.quote(str(temp_file))}")
+            output = stdout.strip()
+            error = stderr.strip()
+            if returncode != 0:
+                return f"退出码 {returncode}\n{error or output}".strip()
+            return output or error
             
         except Exception as e:
             return f"执行失败: {str(e)}"
@@ -443,9 +520,14 @@ def validate_image_path(path: str) -> bool:
     path_obj = Path(path).expanduser()
     if not path_obj.exists() or not path_obj.is_file():
         return False
+    if path_obj.stat().st_size > MAX_IMAGE_BYTES:
+        return False
     
-    supported_formats = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp'}
-    return path_obj.suffix.lower() in supported_formats
+    try:
+        with path_obj.open("rb") as f:
+            return VisionExpert._media_type_for_bytes(f.read(16)) is not None
+    except OSError:
+        return False
 
 
 def get_image_info(image_path: str) -> dict:

@@ -153,33 +153,19 @@ class PipelineOrchestrator:
         if expert_type == "vision":
             self._emit(on_status, "vision", "图片处理模式")
             if self.vision_expert and ctx.image_paths:
-                outputs = []
-                failures = []
-                metadata = []
-                for idx, image_path in enumerate(ctx.image_paths, 1):
-                    ctx.image_path = image_path
-                    result = self.vision_expert.run(ctx)
-                    output = result.get("output", "")
-                    if len(ctx.image_paths) > 1:
-                        outputs.append(f"图片 {idx} ({image_path}):\n{output}")
-                    else:
-                        outputs.append(output)
-                    metadata.append(result.get("metadata", {}))
-                    if not result.get("success", False):
-                        failures.append(output or result.get("error") or f"图片处理失败: {image_path}")
-
-                explanation = "\n\n".join(outputs).strip()
+                result = self.vision_expert.run(ctx)
+                explanation = result.get("output", "").strip()
                 ctx.generator_output = {
                     "explanation": explanation,
                     "patches": [],
-                    "metadata": {"vision": metadata},
+                    "metadata": {"vision": result.get("metadata", {})},
                 }
                 elapsed = time.time() - start_time
-                success = not failures
+                success = result.get("success", False)
                 return {
                     "success": success,
                     "context": ctx,
-                    "error": "\n".join(failures) if failures else None,
+                    "error": None if success else explanation or "图片处理失败",
                     "elapsed": elapsed,
                 }
             else:

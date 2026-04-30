@@ -219,6 +219,23 @@ Prompt Optimizer（可选，需 Anthropic API key）：
 - 支持格式：PNG、JPG、JPEG、GIF、WebP、BMP
 - 安装：`pip install kwcode[multimodal]`
 
+**Vision API 配置**（使用前必配）：
+
+```bash
+# 设置环境变量（支持任何兼容 Anthropic Messages API 的服务）
+export KWCODE_VISION_API_URL="https://your-provider.com/v1/messages"
+export KWCODE_VISION_API_KEY="your-api-key"
+export KWCODE_VISION_MODEL="your-multimodal-model"
+```
+
+支持的 Vision 模型示例：
+- OpenAI: `gpt-4o` (endpoint: `https://api.openai.com/v1/chat/completions`，需用 OpenAI 格式)
+- Anthropic: `claude-sonnet-4-20250514` (endpoint: `https://api.anthropic.com/v1/messages`)
+- 小米 MiMo: `mimo-v2-omni` (Anthropic 格式代理)
+- 本地模型: Ollama 多模态模型（通过 Ollama 兼容 endpoint）
+
+> **注意**：模型必须支持图片输入（多模态），纯文本模型无法处理图片任务。
+
 ### 价值可见
 - `kwcode stats`：完成任务数、节省时间估算
 - 飞轮通知：专家投产时弹出

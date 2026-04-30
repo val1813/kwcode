@@ -20,7 +20,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install build tools
-        run: pip install build twine
+        run: pip install "build" "twine" "setuptools>=68.0,<78.0"
 
       - name: Build package
         run: python -m build

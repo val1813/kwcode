@@ -118,6 +118,8 @@ BugFix · FastAPI · TestGen · API · DeepSeekAPI · Docstring · MyBatis · Of
 
 技术实现：`tree-sitter` 多语言 AST + `rank-bm25` + `SQLite` 调用图持久化。
 
+当前支持：Python（完整）· Go（MVP：函数/方法/基础调用图）。
+
 ### 原理三：Debug Subagent（运行时调试）
 
 **理论来源**：Debug2Fix（Microsoft，ICML 2026）——弱模型 + 交互式调试器 > 强模型裸跑。GPT-5 + Debug2Fix 匹配 Claude Sonnet 基线性能。

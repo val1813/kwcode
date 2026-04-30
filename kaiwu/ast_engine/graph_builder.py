@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 DB_PATH = Path.home() / ".kwcode" / "graph.db"
 
-SUPPORTED_EXTENSIONS = {".py"}  # MVP: Python only (tree-sitter-python)
+SUPPORTED_EXTENSIONS = {".py", ".go"}
 
 SKIP_DIRS = {
     ".git", "__pycache__", "node_modules", ".venv", "venv",
@@ -236,8 +236,12 @@ class GraphBuilder:
         except Exception:
             return 0, 0
 
-        functions = self._parser.extract_functions(tree, source)
-        calls = self._parser.extract_calls(tree, source)
+        language = self._parser.detect_language(file_path)
+        if language is None:
+            return 0, 0
+
+        functions = self._parser.extract_functions(tree, source, language)
+        calls = self._parser.extract_calls(tree, source, language)
 
         node_count = 0
         edge_count = 0

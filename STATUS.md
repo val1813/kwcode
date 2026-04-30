@@ -117,7 +117,7 @@
 1. SQLite 跨 session 查询（spec §7.1 kaiwu.db）
 2. 12 个预置专家完整 benchmark（目前只跑了 BugFix+TestGen）
 3. 实时数据API提示注入（codegen涉及天气/股价时，prompt注入免费API信息，避免模型编造假数据）
-4. 多语言AST支持（JavaScript/TypeScript/Java/Go/Rust 调用图）
+4. 多语言AST支持（Go MVP 已完成；JavaScript/TypeScript/Java/Rust 调用图待做）
 5. pip publish 到 PyPI
 6. install.ps1 / install.sh 一键安装脚本
 

@@ -88,15 +88,6 @@ if (-not $installed) {
     exit 1
 }
 
-# 可选：安装 AST 增强
-Write-Info "尝试安装 AST 增强（可选，需要 C 编译器）..."
-& $pythonCmd -m pip install "kwcode[ast]" --quiet 2>&1 | Out-Null
-if ($LASTEXITCODE -eq 0) {
-    Write-Info "AST 调用图引擎已启用（代码定位更精准）"
-} else {
-    Write-Info "AST 增强跳过（无编译器），使用 LLM 定位（功能不受影响）"
-}
-
 # ── Step 4: 提示配置模型 ─────────────────────────────────────
 Write-Step "模型配置提示..."
 Write-Info "KwCode 支持任何 OpenAI 兼容 API（Ollama / DeepSeek / Qwen 等）"

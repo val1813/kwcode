@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kwcode"
-version = "1.0.7"
+version = "1.0.8"
 description = "KwCode - Local-model coding agent with MoE expert pipeline"
 requires-python = ">=3.10"
 readme = "README.md"
@@ -14,7 +14,6 @@ classifiers = [
     "Development Status :: 4 - Beta",
     "Environment :: Console",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
@@ -33,14 +32,14 @@ dependencies = [
     "pyyaml>=6.0",
     "rank-bm25>=0.2.2",
     "prompt-toolkit>=3.0.0",
+    "tree-sitter>=0.23.0",
+    "tree-sitter-python>=0.23.0",
 ]
 
 [project.optional-dependencies]
 local = ["llama-cpp-python>=0.2.90"]
-ast = ["tree-sitter>=0.23.0", "tree-sitter-python>=0.23.0"]
 full = [
     "kwcode[local]",
-    "kwcode[ast]",
 ]
 dev = [
     "pytest>=7.0.0",

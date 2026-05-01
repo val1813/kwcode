@@ -220,8 +220,13 @@ def _run_task(task, gate, orchestrator, memory, project_root, verbose, plan=Fals
             gate_result = gate.classify(task_with_images, memory_context=memory.load(project_root))
         except Exception as e:
             progress.stop()
-            console.print(f"\n  [red]模型调用失败：{e}[/red]")
-            console.print("  [dim]请检查模型是否正常运行（ollama list），或用 /model 切换模型[/dim]")
+            console.print(f"\n  [red]❌ 模型调用失败[/red]")
+            console.print(f"  [yellow]错误详情：[/yellow]{e}")
+            console.print("\n  [cyan]💡 可能的解决方案：[/cyan]")
+            console.print("    1. 检查模型是否正常运行：[dim]ollama list[/dim]")
+            console.print("    2. 切换到其他模型：[dim]/model qwen3:8b[/dim]")
+            console.print("    3. 检查 API 配置：[dim]/api show[/dim]")
+            console.print("    4. 如果使用云端 API，检查网络连接和 API key")
             return False
 
     et = gate_result.get("expert_type", "chat")
@@ -325,7 +330,15 @@ def _run_task(task, gate, orchestrator, memory, project_root, verbose, plan=Fals
             orchestrator._last_result = result
         except Exception as e:
             progress.stop()
-            console.print(f"\n  [red]执行异常：{e}[/red]")
+            console.print(f"\n  [red]❌ 执行异常[/red]")
+            console.print(f"  [yellow]错误详情：[/yellow]{e}")
+            console.print("\n  [cyan]💡 调试建议：[/cyan]")
+            console.print("    1. 查看详细日志：[dim]~/.kwcode/kwcode.log[/dim]")
+            console.print("    2. 尝试更简单的任务描述")
+            console.print("    3. 使用 /plan 模式查看执行步骤：[dim]/plan <任务描述>[/dim]")
+            console.print("    4. 如果问题持续，请在 GitHub 提交 issue")
+            import traceback
+            console.print(f"\n  [dim]堆栈跟踪：\n{traceback.format_exc()}[/dim]")
             return False
 
     # ── Output: user-friendly result summary ──
@@ -641,7 +654,13 @@ def _repl(model_path, ollama_url, ollama_model, project_root, verbose, no_search
                             verbose=verbose,
                         )
                     else:
-                        console.print(f"  [red]目录不存在: {new_root}[/red]")
+                        console.print(f"  [red]❌ 目录不存在[/red]")
+                        console.print(f"  [yellow]路径：[/yellow]{new_root}")
+                        console.print("\n  [cyan]💡 提示：[/cyan]")
+                        console.print("    • 检查路径拼写是否正确")
+                        console.print("    • 使用绝对路径或相对路径")
+                        console.print(f"    • 当前目录：[dim]{os.getcwd()}[/dim]")
+                        console.print("    • 示例：[dim]/cd ~/projects/myapp[/dim]")
 
             elif cmd == "/experts":
                 experts = registry.list_experts()
@@ -1064,11 +1083,25 @@ def _handle_api_command(parts: list[str], current_url: str, current_model: str):
 
     sub = parts[1]
     if sub not in ("temp", "default"):
-        console.print("  [red]未知子命令[/red]，用法: /api show | /api temp <url> | /api default <url>")
+        console.print("  [red]❌ 未知子命令[/red]")
+        console.print("\n  [cyan]用法：[/cyan]")
+        console.print("    /api show              - 查看当前 API 配置")
+        console.print("    /api temp <url> [key]  - 临时切换 API（本次会话）")
+        console.print("    /api default <url> [key] - 永久保存 API 配置")
+        console.print("\n  [cyan]示例：[/cyan]")
+        console.print("    /api temp http://localhost:11434")
+        console.print("    /api default https://api.deepseek.com sk-xxx")
         return None
 
     if len(parts) < 3:
-        console.print("  [red]缺少URL参数[/red]，例: /api temp http://localhost:11434")
+        console.print("  [red]❌ 缺少 URL 参数[/red]")
+        console.print("\n  [cyan]示例：[/cyan]")
+        console.print("    /api temp http://localhost:11434")
+        console.print("    /api default https://api.deepseek.com your-api-key")
+        console.print("\n  [cyan]常用 API 地址：[/cyan]")
+        console.print("    • Ollama 本地：http://localhost:11434")
+        console.print("    • DeepSeek：https://api.deepseek.com")
+        console.print("    • 硅基流动：https://api.siliconflow.cn/v1")
         return None
 
     new_url = parts[2].rstrip("/")

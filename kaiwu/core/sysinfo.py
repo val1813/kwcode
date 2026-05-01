@@ -40,24 +40,39 @@ def get_sysinfo() -> SysInfo:
     except Exception:
         pass
 
-    # GPU VRAM（nvidia-smi，可选 — FLEX-2 降级）
-    try:
-        out = subprocess.check_output(
-            [
-                "nvidia-smi",
-                "--query-gpu=name,memory.used,memory.total",
-                "--format=csv,noheader,nounits",
-            ],
-            timeout=2,
-            stderr=subprocess.DEVNULL,
-        ).decode(encoding="utf-8").strip().split("\n")[0]
-        parts = [p.strip() for p in out.split(",")]
-        if len(parts) == 3:
-            info.gpu_name = parts[0][:20]
-            info.vram_used_gb = int(parts[1]) / 1024
-            info.vram_total_gb = int(parts[2]) / 1024
-    except Exception:
-        pass  # 非NVIDIA或未安装驱动，显示 N/A
+    # GPU VRAM（平台特定检测）
+    if platform.system() == "Darwin":
+        # macOS: Apple Silicon 或 AMD GPU
+        try:
+            out = subprocess.check_output(
+                ["sysctl", "hw.model"],
+                timeout=2,
+                stderr=subprocess.DEVNULL,
+            ).decode(encoding="utf-8").strip()
+            if "Mac" in out:
+                info.gpu_name = "Apple Silicon GPU"
+                # macOS 使用统一内存架构，VRAM 信息不适用
+        except Exception:
+            pass
+    else:
+        # Windows/Linux: NVIDIA GPU（nvidia-smi）
+        try:
+            out = subprocess.check_output(
+                [
+                    "nvidia-smi",
+                    "--query-gpu=name,memory.used,memory.total",
+                    "--format=csv,noheader,nounits",
+                ],
+                timeout=2,
+                stderr=subprocess.DEVNULL,
+            ).decode(encoding="utf-8").strip().split("\n")[0]
+            parts = [p.strip() for p in out.split(",")]
+            if len(parts) == 3:
+                info.gpu_name = parts[0][:20]
+                info.vram_used_gb = int(parts[1]) / 1024
+                info.vram_total_gb = int(parts[2]) / 1024
+        except Exception:
+            pass  # 非NVIDIA或未安装驱动，显示 N/A
 
     return info
 

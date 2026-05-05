@@ -382,7 +382,7 @@ class LLMBackend:
             if not choices:
                 logger.error("OpenAI API response missing choices: %s", str(data)[:200])
                 return ""
-            raw = choices[0].get("message", {}).get("content", "").strip()
+            raw = (choices[0].get("message", {}).get("content") or "").strip()
 
             # Track tokens (use API response if available, else estimate)
             usage = data.get("usage", {})

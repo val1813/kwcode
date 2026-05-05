@@ -227,7 +227,7 @@ class LLMBackend:
 
         full_prompt = f"{system}\n\n{prompt}" if system else prompt
         resp = self._llm(full_prompt, **kwargs)
-        return resp["choices"][0]["text"].strip()
+        return (resp["choices"][0]["text"] or "").strip()
 
     def _generate_ollama(
         self, prompt: str, system: str, max_tokens: int,
@@ -323,10 +323,10 @@ class LLMBackend:
             if not msg:
                 logger.error("Ollama response missing 'message' key: %s", str(data)[:200])
                 return ""
-            raw = msg.get("content", "").strip()
+            raw = (msg.get("content") or "").strip()
 
             if not raw and self._is_reasoning:
-                thinking = msg.get("thinking", "")
+                thinking = msg.get("thinking")
                 if thinking:
                     logger.info("content为空，从thinking字段提取（%d chars）", len(thinking))
                     raw = thinking.strip()
@@ -382,7 +382,7 @@ class LLMBackend:
             if not choices:
                 logger.error("OpenAI API response missing choices: %s", str(data)[:200])
                 return ""
-            raw = choices[0].get("message", {}).get("content", "").strip()
+            raw = (choices[0].get("message", {}).get("content") or "").strip()
 
             # Track tokens (use API response if available, else estimate)
             usage = data.get("usage", {})

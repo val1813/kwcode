@@ -1,9 +1,8 @@
-"""Tests for rate limiter system."""
+"""Tests for the rate limiter system (token_bucket, limiter)."""
 
 import pytest
-import time
-from limiter import TokenBucket, SlidingWindowCounter
-from middleware import PerKeyLimiter, RateLimitMiddleware, RateLimitExceeded
+from token_bucket import TokenBucket, SlidingWindowCounter
+from limiter import PerKeyLimiter, CompositeRateLimiter, RateLimitExceeded
 
 
 class TestTokenBucket:
@@ -23,32 +22,35 @@ class TestTokenBucket:
         assert bucket.allow(now=0.0) is False
 
     def test_refills_over_time(self):
-        """After 2 seconds at rate=1, should have 2 new tokens."""
+        """After 2 seconds at rate=1.0, should have 2 new tokens."""
         bucket = TokenBucket(capacity=10, refill_rate=1.0)
-        # Drain 5 tokens
-        for _ in range(5):
+        for _ in range(10):
             bucket.allow(now=0.0)
-        assert bucket.available_tokens(now=0.0) == 0.0
-        # 2 seconds later, should have 2 tokens
         tokens = bucket.available_tokens(now=2.0)
         assert abs(tokens - 2.0) < 0.01
 
     def test_refill_does_not_exceed_capacity(self):
         bucket = TokenBucket(capacity=5, refill_rate=10.0)
-        # Drain all
         for _ in range(5):
             bucket.allow(now=0.0)
-        # Wait a long time
         tokens = bucket.available_tokens(now=100.0)
         assert tokens == 5.0
 
-    def test_refill_rate_respected(self):
-        """Rate=2 tokens/sec: after 1 second, 2 tokens added."""
-        bucket = TokenBucket(capacity=10, refill_rate=2.0)
+    def test_refill_rate_respected_fractional_second(self):
+        """Rate=4 tokens/sec: after 0.5 seconds, 2 tokens added."""
+        bucket = TokenBucket(capacity=10, refill_rate=4.0)
         for _ in range(10):
             bucket.allow(now=0.0)
-        tokens = bucket.available_tokens(now=1.0)
+        tokens = bucket.available_tokens(now=0.5)
         assert abs(tokens - 2.0) < 0.01
+
+    def test_refill_rate_respected_sub_second(self):
+        """Rate=10 tokens/sec: after 0.3 seconds, 3 tokens added."""
+        bucket = TokenBucket(capacity=20, refill_rate=10.0)
+        for _ in range(20):
+            bucket.allow(now=0.0)
+        tokens = bucket.available_tokens(now=0.3)
+        assert abs(tokens - 3.0) < 0.01
 
 
 class TestSlidingWindow:
@@ -59,7 +61,7 @@ class TestSlidingWindow:
 
     def test_rejects_over_limit(self):
         sw = SlidingWindowCounter(limit=3, window_seconds=1.0)
-        for i in range(3):
+        for _ in range(3):
             sw.allow(now=0.0)
         assert sw.allow(now=0.0) is False
 
@@ -68,7 +70,6 @@ class TestSlidingWindow:
         sw = SlidingWindowCounter(limit=3, window_seconds=1.0)
         for _ in range(3):
             sw.allow(now=0.0)
-        # 1.1 seconds later, old requests are outside window
         assert sw.allow(now=1.1) is True
 
     def test_current_count(self):
@@ -77,7 +78,6 @@ class TestSlidingWindow:
         sw.allow(now=0.5)
         sw.allow(now=1.0)
         assert sw.current_count(now=1.0) == 3
-        # At t=2.1, first request (t=0.0) is outside window
         assert sw.current_count(now=2.1) == 2
 
     def test_boundary_exactly_at_window_edge(self):
@@ -85,8 +85,17 @@ class TestSlidingWindow:
         sw = SlidingWindowCounter(limit=2, window_seconds=1.0)
         sw.allow(now=0.0)
         sw.allow(now=0.5)
-        # At t=1.0, the request at t=0.0 is exactly at the boundary (evicted)
+        # At t=1.0, the request at t=0.0 is exactly at the boundary and
+        # should be evicted (it is no longer within the window).
         assert sw.current_count(now=1.0) == 1
+
+    def test_window_slides_correctly(self):
+        sw = SlidingWindowCounter(limit=3, window_seconds=1.0)
+        sw.allow(now=0.0)
+        sw.allow(now=0.3)
+        sw.allow(now=0.6)
+        # All 3 slots used; at t=1.0 the first (t=0.0) is evicted
+        assert sw.allow(now=1.0) is True
 
 
 class TestPerKeyLimiter:
@@ -95,37 +104,22 @@ class TestPerKeyLimiter:
         assert limiter.allow("user-1", now=0.0) is True
         assert limiter.allow("user-1", now=0.0) is True
         assert limiter.allow("user-1", now=0.0) is False
-        # user-2 has its own bucket
         assert limiter.allow("user-2", now=0.0) is True
 
     def test_reset_clears_limiter(self):
-        limiter = PerKeyLimiter(lambda: TokenBucket(capacity=1, refill_rate=1.0))
+        limiter = PerKeyLimiter(lambda: TokenBucket(capacity=1, refill_rate=0.0))
         limiter.allow("user-1", now=0.0)
         assert limiter.allow("user-1", now=0.0) is False
         limiter.reset("user-1")
         assert limiter.allow("user-1", now=0.0) is True
 
 
-class TestRateLimitMiddleware:
-    def test_allows_request(self):
-        limiter = PerKeyLimiter(lambda: TokenBucket(capacity=5, refill_rate=1.0))
-        mw = RateLimitMiddleware(limiter, key_fn=lambda req: req["ip"])
-        result = mw({"ip": "1.2.3.4"}, lambda req: "ok")
-        assert result == "ok"
-        assert mw.allowed_count == 1
-
-    def test_rejects_over_limit(self):
-        limiter = PerKeyLimiter(lambda: TokenBucket(capacity=1, refill_rate=0.0))
-        mw = RateLimitMiddleware(limiter, key_fn=lambda req: req["ip"])
-        mw({"ip": "1.2.3.4"}, lambda req: "ok")
-        with pytest.raises(RateLimitExceeded):
-            mw({"ip": "1.2.3.4"}, lambda req: "ok")
-        assert mw.rejected_count == 1
-
-    def test_different_keys_independent(self):
-        limiter = PerKeyLimiter(lambda: TokenBucket(capacity=1, refill_rate=0.0))
-        mw = RateLimitMiddleware(limiter, key_fn=lambda req: req["ip"])
-        mw({"ip": "1.1.1.1"}, lambda req: "ok")
-        # Different IP should still be allowed
-        result = mw({"ip": "2.2.2.2"}, lambda req: "ok")
-        assert result == "ok"
+class TestCompositeRateLimiter:
+    def test_both_must_pass(self):
+        bucket = TokenBucket(capacity=10, refill_rate=1.0)
+        window = SlidingWindowCounter(limit=2, window_seconds=1.0)
+        composite = CompositeRateLimiter(bucket, window)
+        assert composite.allow(now=0.0) is True
+        assert composite.allow(now=0.0) is True
+        # Window limit hit even though bucket has tokens
+        assert composite.allow(now=0.0) is False

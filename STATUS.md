@@ -69,6 +69,18 @@
 - CHAT_SEARCH_FAIL_SYSTEM：
   - 整段重写为"回复≤50字"硬约束
 
+**遥测防护（服务端三层守卫）**
+- HMAC-SHA256签名：客户端用密钥签payload，无签名→403
+- IP限流：同一IP每分钟≤30次，超限→429
+- 字段校验：error_type枚举白名单 + model名正则(`[a-zA-Z0-9.:\-_/]`) + 长度限制
+- /stats端点需管理token，无token→401
+
+**版本号统一**
+- 唯一真相源：`pyproject.toml` version = "1.5.1"
+- formatters.py / telemetry/client.py / server/models.py / server/app.py
+  全部改为 `importlib.metadata.version("kwcode")`，未安装时 fallback "1.5.1"
+- 修前状态：pyproject=1.4.0, formatters=0.9.0, telemetry=1.5.0（三处不一致）
+
 **测试：19个新测试**
 - StrategyStats: record/get_best_sequence/min_attempts/persistence/corrupted recovery (5)
 - UserPatternMemory: record/warning_threshold/top_errors/summary/unknown_ignored (6)

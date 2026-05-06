@@ -9,9 +9,26 @@
 
 ## 当前状态：v1.1.0 (2026-05-06)
 
-328/328 测试全绿（不含bench_tasks存根）。P0+P1优化全部完成。
+328/328 测试全绿（不含bench_tasks存根）。P0+P1+P2优化全部完成，spec关闭。
 
-### v1.1.0 新增：P0+P1 优化（7文件 +362行）
+### v1.1.0 新增：P0+P1+P2 全量优化
+
+**P2-1: Watchdog任务超时** (`core/orchestrator.py`)
+- threading.Timer 300秒硬超时，卡死任务自动终止
+- 重试循环每轮检查watchdog状态
+
+**P2-2: Gate路由准确率统计** (`stats/value_tracker.py` + `cli/main.py`)
+- `get_gate_accuracy()` 按expert_type统计成功率/平均耗时/平均重试
+- 新增 `/stats` CLI命令展示30天统计报告
+
+**其他**
+- 新增 CONTRIBUTING.md（架构红线、PR标准、贡献类型指南）
+- README 贡献章节重写（精简+链接CONTRIBUTING.md）
+- 删除 vision_expert.py.bak（vision_expert保留为辅助输入通道）
+
+---
+
+#### P0+P1 优化（7文件 +362行）
 
 **P0-1: Verifier结构化输出** (`experts/verifier.py`)
 - `_classify_error()` 纯正则提取 error_type/error_file/error_line/error_message/failed_tests

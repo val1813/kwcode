@@ -306,13 +306,32 @@ class GeneratorExpert:
 
     def _build_system(self, ctx: TaskContext, base_system: str = "") -> str:
         """Combine expert_system_prompt (from registry) with base system prompt.
-        Appends WEB_DESIGN_RULES when the task involves web/HTML generation."""
+        Appends tier-specific constraints and WEB_DESIGN_RULES when applicable."""
         expert_prompt = ctx.expert_system_prompt or ""
         base = base_system or GENERATOR_BASE_SYSTEM
         if expert_prompt:
             system = f"{expert_prompt}\n\n{base}"
         else:
             system = base
+
+        # 模型能力自适应：按tier注入不同强度的格式约束
+        tier = getattr(ctx, 'model_tier', '')
+        if tier == "small":
+            system += (
+                "\n\n## 格式约束（小模型严格执行）\n"
+                "- 每次只修改1个函数，修改行数≤10行\n"
+                "- class内方法必须保持原有缩进（通常4空格）\n"
+                "- 直接输出代码，禁止任何解释文字\n"
+                "- 工具调用之间不超过15个词\n"
+                "- 禁止输出markdown代码块标记\n"
+            )
+        elif tier == "large":
+            system += (
+                "\n\n## 格式约束\n"
+                "- 保持代码风格一致，缩进与原文件匹配\n"
+            )
+        # medium: 用GENERATOR_BASE_SYSTEM已有的约束即可
+
         # Append web design rules for HTML/CSS/web tasks
         if self._is_web_task(ctx.user_input):
             system = f"{system}\n\n{WEB_DESIGN_RULES}"

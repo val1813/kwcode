@@ -41,6 +41,7 @@ from kaiwu.flywheel.strategy_stats import StrategyStats
 from kaiwu.flywheel.user_pattern_memory import UserPatternMemory
 from kaiwu.telemetry.client import TelemetryClient
 from kaiwu.audit.logger import AuditLogger
+from kaiwu.core.model_capability import detect_model_tier, STRATEGIES, ModelTier
 
 logger = logging.getLogger(__name__)
 
@@ -135,6 +136,15 @@ class PipelineOrchestrator:
         self._user_patterns = UserPatternMemory()
         self._telemetry = TelemetryClient()
         self._audit = AuditLogger()
+        # 模型能力检测（从LLM后端取模型名，失败默认MEDIUM）
+        try:
+            model_name = getattr(self.generator.llm, 'ollama_model', '') or ''
+            ollama_url = getattr(self.generator.llm, 'ollama_url', 'http://localhost:11434')
+            self._model_tier = detect_model_tier(model_name, ollama_url)
+            self._model_strategy = STRATEGIES[self._model_tier]
+        except Exception:
+            self._model_tier = ModelTier.MEDIUM
+            self._model_strategy = STRATEGIES[ModelTier.MEDIUM]
         self.bus = bus or EventBus()
         self._wink = WinkMonitor()
         self._cognitive_gate = CognitiveGate()
@@ -181,6 +191,9 @@ class PipelineOrchestrator:
             kaiwu_memory=self.memory.load(project_root),
             expert_system_prompt=gate_result.get("system_prompt", ""),
         )
+
+        # 模型能力等级注入ctx
+        ctx.model_tier = self._model_tier.value
 
         # 用户错误模式提示注入
         warning = self._user_patterns.get_warning_hint()
@@ -838,9 +851,12 @@ class PipelineOrchestrator:
         self._audit.log(stage, detail)
 
     def _get_max_retries(self, gate_result: dict) -> int:
-        """Dynamic retry budget based on task difficulty."""
+        """Dynamic retry budget based on task difficulty and model strategy."""
         difficulty = gate_result.get("difficulty", "easy")
-        return self._RETRY_BY_DIFFICULTY.get(difficulty, self.MAX_RETRIES)
+        base = self._RETRY_BY_DIFFICULTY.get(difficulty, self.MAX_RETRIES)
+        # 模型策略可以覆盖（小模型限制更严）
+        strategy_max = self._model_strategy.max_retries
+        return min(base, strategy_max)
 
     @staticmethod
     def _needs_realtime_data(user_input: str) -> bool:

@@ -71,10 +71,15 @@ def build_pipeline(model_path, ollama_url, ollama_model, project_root, verbose):
     _cfg = _load_cfg().get("default", {})
     _api_key = _cfg.get("api_key", "")
 
+    # Ctx自适应：检测模型可用上下文窗口
+    from kaiwu.core.model_capability import get_effective_ctx
+    effective_ctx = get_effective_ctx(ollama_model, ollama_url)
+
     llm = LLMBackend(
         model_path=model_path,
         ollama_url=ollama_url,
         ollama_model=ollama_model,
+        n_ctx=effective_ctx,
         verbose=verbose,
         api_key=_api_key,
     )

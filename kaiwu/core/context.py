@@ -82,3 +82,6 @@ class TaskContext:
 
     # AdaptThink: think模式配置（orchestrator根据expert_type×difficulty设置）
     think_config: dict = field(default_factory=lambda: {"think": False, "budget": 0})
+
+    # 模型能力等级（orchestrator检测后写入，Generator按此调整约束）
+    model_tier: str = ""  # "small"/"medium"/"large"

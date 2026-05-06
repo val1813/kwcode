@@ -150,6 +150,61 @@ def _detect_from_name(model_name: str) -> ModelTier:
     return ModelTier.MEDIUM
 
 
+def get_effective_ctx(model_name: str,
+                      ollama_url: str = "http://localhost:11434") -> int:
+    """
+    获取当前模型实际可用的ctx大小。
+    查询链：llama.cpp /props → vLLM /v1/models → Ollama modelinfo → 按tier默认值。
+    失败全部静默，返回保守默认值。
+    """
+    import httpx
+
+    # 1. llama.cpp /props → 运行时真实值，最准
+    try:
+        r = httpx.get("http://localhost:8080/props", timeout=2)
+        if r.status_code == 200:
+            n_ctx = r.json().get("n_ctx")
+            if n_ctx and n_ctx > 0:
+                return int(n_ctx * 0.8)
+    except Exception:
+        pass
+
+    # 2. vLLM /v1/models → max_model_len
+    try:
+        vllm_url = ollama_url.replace("11434", "8000")
+        r = httpx.get(f"{vllm_url}/v1/models", timeout=2)
+        if r.status_code == 200:
+            data = r.json().get("data", [])
+            if data and "max_model_len" in data[0]:
+                return int(data[0]["max_model_len"] * 0.8)
+    except Exception:
+        pass
+
+    # 3. Ollama /api/show → modelinfo.llama.context_length（模型原生上限）
+    try:
+        r = httpx.post(
+            f"{ollama_url}/api/show",
+            json={"name": model_name},
+            timeout=3,
+        )
+        if r.status_code == 200:
+            data = r.json()
+            native_ctx = data.get("modelinfo", {}).get("llama.context_length", 0)
+            if native_ctx > 0:
+                # 原生上限取80%，且不超过65536（避免本地推理速度崩）
+                return min(int(native_ctx * 0.8), 65536)
+    except Exception:
+        pass
+
+    # 4. 按tier给保守默认值
+    tier = detect_model_tier(model_name, ollama_url)
+    return {
+        ModelTier.SMALL: 16384,
+        ModelTier.MEDIUM: 32768,
+        ModelTier.LARGE: 65536,
+    }[tier]
+
+
 def get_strategy(tier: ModelTier) -> ModelStrategy:
     """Get execution strategy for a given tier."""
     return STRATEGIES[tier]

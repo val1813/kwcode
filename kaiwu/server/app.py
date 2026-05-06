@@ -38,9 +38,10 @@ def create_app(
     )
     from kaiwu.server.pipeline_factory import build_pipeline
 
+    from kaiwu.server.models import _VERSION
     app = FastAPI(
         title="KwCode Server",
-        version="1.5.0",
+        version=_VERSION,
         description="KwCode coding agent HTTP API with SSE streaming",
     )
 
@@ -78,7 +79,7 @@ def create_app(
     async def health():
         return HealthResponse(
             status="ok",
-            version="1.5.0",
+            version=_VERSION,
             model=ollama_model or "local",
             project_root=project_root,
         )

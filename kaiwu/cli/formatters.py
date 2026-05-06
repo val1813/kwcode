@@ -90,7 +90,11 @@ def verbose_callback(stage: str, detail: str):
         console.print(f"  [{color}]> {detail}[/{color}]")
 
 
-VERSION = "0.9.0"
+try:
+    from importlib.metadata import version as _pkg_version
+    VERSION = _pkg_version("kwcode")
+except Exception:
+    VERSION = "1.5.1"
 
 # ── Shadow/重影大字 KAIWU ──
 _KAIWU_SHADOW = [

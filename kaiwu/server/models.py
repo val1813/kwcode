@@ -5,6 +5,12 @@ Pydantic models for kwcode server API.
 from typing import Optional
 from pydantic import BaseModel, Field
 
+try:
+    from importlib.metadata import version as _pkg_version
+    _VERSION = _pkg_version("kwcode")
+except Exception:
+    _VERSION = "1.5.1"
+
 
 class TaskRequest(BaseModel):
     """Request to submit a task."""
@@ -33,7 +39,7 @@ class TaskResult(BaseModel):
 class HealthResponse(BaseModel):
     """Health check response."""
     status: str = "ok"
-    version: str = "1.5.0"
+    version: str = _VERSION
     model: str = ""
     project_root: str = ""
 

@@ -22,7 +22,11 @@ logger = logging.getLogger(__name__)
 
 TELEMETRY_URL = "https://llmbbs.com/api/v1/event"
 CONFIG_PATH = Path.home() / ".kwcode" / "config.yaml"
-VERSION = "1.5.0"
+try:
+    from importlib.metadata import version as _pkg_version
+    VERSION = _pkg_version("kwcode")
+except Exception:
+    VERSION = "1.5.1"
 _HMAC_SECRET = b"kwcode-telemetry-2026-v1"
 
 

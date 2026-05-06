@@ -6,6 +6,7 @@ RED-3: Independent context window, does not inherit Generator history.
 
 import json
 import logging
+import os
 import re
 from typing import Optional
 
@@ -14,6 +15,59 @@ from kaiwu.llm.llama_backend import LLMBackend
 from kaiwu.tools.executor import ToolExecutor
 
 logger = logging.getLogger(__name__)
+
+# ── Multi-language test runners ─────────────────────────────────
+# Ordered by priority: first match wins
+TEST_RUNNERS = {
+    "python":     [
+        ("pytest", "python -m pytest tests/ --tb=short -q"),
+        ("unittest", "python -m unittest discover -s tests -q"),
+    ],
+    "javascript": [("jest", "npx jest --ci --passWithNoTests")],
+    "typescript": [("jest", "npx jest --ci --passWithNoTests")],
+    "go":         [("go_test", "go test ./...")],
+    "rust":       [("cargo_test", "cargo test 2>&1")],
+    "java":       [
+        ("maven", "mvn test -q"),
+        ("gradle", "gradle test"),
+    ],
+    "csharp":     [("dotnet", "dotnet test --no-build -q")],
+}
+
+# Project marker files → language detection
+_PROJECT_MARKERS = {
+    "go.mod":              "go",
+    "Cargo.toml":          "rust",
+    "pom.xml":             "java",
+    "build.gradle":        "java",
+    "build.gradle.kts":    "java",
+    "package.json":        "javascript",
+    "tsconfig.json":       "typescript",
+}
+
+# Syntax check commands per extension
+_SYNTAX_CHECKS = {
+    ".py":   'python -m py_compile "{file}"',
+    ".go":   'go vet "{file}"',
+    ".rs":   "cargo check 2>&1",
+    ".java": 'javac -d /tmp "{file}"',
+}
+
+
+def _detect_project_language(project_root: str, tool_executor: ToolExecutor) -> str:
+    """Detect project language from marker files. Defaults to 'python'."""
+    try:
+        entries = tool_executor.list_dir(project_root)
+        if isinstance(entries, list):
+            for entry in entries:
+                if entry in _PROJECT_MARKERS:
+                    return _PROJECT_MARKERS[entry]
+            # Check for tsconfig (overrides package.json → typescript)
+            if "tsconfig.json" in entries:
+                return "typescript"
+    except Exception:
+        pass
+    return "python"
 
 
 class VerifierExpert:
@@ -91,18 +145,14 @@ class VerifierExpert:
             ctx.verifier_output = result
             return result
 
-        # Step 3: Syntax check on modified Python files
+        # Step 3: Syntax check on modified files (multi-language)
         syntax_ok = True
         syntax_errors = []
         for fpath in applied_files:
-            if fpath.endswith(".py"):
-                _, stderr, rc = self.tools.run_bash(
-                    f'python -m py_compile "{fpath}"',
-                    cwd=ctx.project_root,
-                )
-                if rc != 0:
-                    syntax_ok = False
-                    syntax_errors.append(f"{fpath}: {stderr.strip()}")
+            err = self._syntax_check_file(fpath, ctx.project_root)
+            if err:
+                syntax_ok = False
+                syntax_errors.append(err)
 
         if not syntax_ok:
             self._rollback(backups)
@@ -152,6 +202,56 @@ class VerifierExpert:
         ctx.verifier_output = result
         return result
 
+    def _syntax_check_file(self, fpath: str, project_root: str) -> Optional[str]:
+        """Run syntax check for a single file. Returns error string or None."""
+        ext = os.path.splitext(fpath)[1].lower()
+
+        if ext == ".py":
+            _, stderr, rc = self.tools.run_bash(
+                f'python -m py_compile "{fpath}"',
+                cwd=project_root,
+            )
+            if rc != 0:
+                return f"{fpath}: {stderr.strip()}"
+
+        elif ext == ".go":
+            _, stderr, rc = self.tools.run_bash(
+                f'go vet "{fpath}"',
+                cwd=project_root,
+            )
+            if rc != 0:
+                return f"{fpath}: {stderr.strip()}"
+
+        elif ext in (".ts", ".tsx"):
+            # Only check if tsconfig.json exists
+            tsconfig = os.path.join(project_root, "tsconfig.json")
+            if os.path.exists(tsconfig):
+                _, stderr, rc = self.tools.run_bash(
+                    f'npx tsc --noEmit "{fpath}"',
+                    cwd=project_root,
+                )
+                if rc != 0:
+                    return f"{fpath}: {stderr.strip()[:200]}"
+
+        elif ext == ".rs":
+            # Rust checks at project level
+            _, stderr, rc = self.tools.run_bash(
+                "cargo check 2>&1",
+                cwd=project_root,
+            )
+            if rc != 0:
+                return f"{fpath}: {stderr.strip()[:200]}"
+
+        elif ext == ".java":
+            _, stderr, rc = self.tools.run_bash(
+                f'javac -d /tmp "{fpath}"',
+                cwd=project_root,
+            )
+            if rc != 0:
+                return f"{fpath}: {stderr.strip()[:200]}"
+
+        return None
+
     def _classify_error(self, error_detail: str) -> dict:
         """Extract structured error info from pytest/compile output. Pure regex, no LLM."""
         info = {"error_type": "unknown", "error_file": "", "error_line": 0,
@@ -172,15 +272,34 @@ class VerifierExpert:
         elif any(exc in error_detail for exc in ("TypeError", "ValueError", "KeyError",
                  "AttributeError", "NameError", "IndexError", "RuntimeError")):
             info["error_type"] = "runtime"
+        # Go errors
+        elif "undefined:" in error_detail or "cannot use" in error_detail:
+            info["error_type"] = "syntax"
+        # Rust errors
+        elif "error[E" in error_detail:
+            info["error_type"] = "syntax"
+        # Java errors
+        elif "error:" in error_detail and ".java:" in error_detail:
+            info["error_type"] = "syntax"
 
         # Extract file and line: File "xxx.py", line 42
         file_match = re.search(r'File "([^"]+)", line (\d+)', error_detail)
         if file_match:
             info["error_file"] = file_match.group(1)
             info["error_line"] = int(file_match.group(2))
+        else:
+            # Go/Rust/Java format: file.go:42:5: error
+            alt_match = re.search(r'([^\s:]+\.\w+):(\d+):', error_detail)
+            if alt_match:
+                info["error_file"] = alt_match.group(1)
+                info["error_line"] = int(alt_match.group(2))
 
         # Extract failed test names: "FAILED tests/test_xxx.py::test_func"
         info["failed_tests"] = re.findall(r'FAILED\s+(\S+::\S+)', error_detail)
+        # Go test failures: "--- FAIL: TestName"
+        info["failed_tests"].extend(re.findall(r'--- FAIL:\s+(\S+)', error_detail))
+        # Rust test failures: "test xxx ... FAILED"
+        info["failed_tests"].extend(re.findall(r'test\s+(\S+)\s+\.\.\.\s+FAILED', error_detail))
 
         # Extract error message
         lines = [l.strip() for l in error_detail.splitlines() if l.strip()]
@@ -196,43 +315,101 @@ class VerifierExpert:
         return info
 
     def _run_tests(self, ctx: TaskContext) -> tuple[int, int, str]:
-        """Run project tests. Returns (passed, total, error_detail)."""
-        # Try to detect test runner
-        test_commands = [
-            ("pytest", "python -m pytest tests/ --tb=short -q"),
-            ("unittest", "python -m unittest discover -s tests -q"),
-        ]
+        """Run project tests. Returns (passed, total, error_detail).
+        Python default: python -m pytest tests/ --tb=short -q
+        """
+        # Detect project language
+        project_lang = _detect_project_language(ctx.project_root, self.tools)
 
-        # Check if pytest is available
-        _, _, rc = self.tools.run_bash("python -m pytest --version", cwd=ctx.project_root)
-        if rc != 0:
-            # No pytest, try unittest
-            test_commands = test_commands[1:]
+        # Get test runners for this language
+        runners = TEST_RUNNERS.get(project_lang, TEST_RUNNERS["python"])
 
-        # Check if tests directory exists
-        test_dirs = self.tools.list_dir(ctx.project_root)
-        # list_dir returns ["[ERROR] ..."] on failure — treat as no tests
-        has_tests = any(d in ("tests", "test") for d in test_dirs if not d.startswith("[ERROR]"))
-        if not has_tests:
-            return 0, 0, ""  # No tests to run
+        # For Python: check if pytest is available
+        if project_lang == "python":
+            _, _, rc = self.tools.run_bash("python -m pytest --version", cwd=ctx.project_root)
+            if rc != 0:
+                # No pytest, try unittest only
+                runners = [("unittest", "python -m unittest discover -s tests -q")]
 
-        for name, cmd in test_commands:
+            # Check if tests directory exists
+            test_dirs = self.tools.list_dir(ctx.project_root)
+            has_tests = any(d in ("tests", "test") for d in test_dirs if not d.startswith("[ERROR]"))
+            if not has_tests:
+                return 0, 0, ""  # No tests to run
+
+        elif project_lang == "go":
+            # Go always has tests if go.mod exists
+            pass
+
+        elif project_lang == "rust":
+            # Rust always has tests if Cargo.toml exists
+            pass
+
+        elif project_lang in ("javascript", "typescript"):
+            # Check if package.json has test script
+            pkg_json = os.path.join(ctx.project_root, "package.json")
+            if os.path.exists(pkg_json):
+                try:
+                    with open(pkg_json, "r", encoding="utf-8") as f:
+                        pkg = json.load(f)
+                    if "test" in pkg.get("scripts", {}):
+                        runners = [("npm_test", "npm test -- --ci")]
+                except Exception:
+                    pass
+            else:
+                return 0, 0, ""
+
+        elif project_lang == "java":
+            # Check for pom.xml or build.gradle
+            has_maven = os.path.exists(os.path.join(ctx.project_root, "pom.xml"))
+            has_gradle = os.path.exists(os.path.join(ctx.project_root, "build.gradle"))
+            if not has_maven and not has_gradle:
+                return 0, 0, ""
+            if has_gradle:
+                runners = [("gradle", "gradle test")]
+
+        else:
+            # Unknown language, check for Python tests as fallback
+            test_dirs = self.tools.list_dir(ctx.project_root)
+            has_tests = any(d in ("tests", "test") for d in test_dirs if not d.startswith("[ERROR]"))
+            if not has_tests:
+                return 0, 0, ""
+
+        # Run test commands
+        for name, cmd in runners:
             stdout, stderr, rc = self.tools.run_bash(cmd, cwd=ctx.project_root, timeout=120)
+            output = stdout + "\n" + stderr
             if rc == 0:
-                passed, total = self._parse_test_output(stdout + stderr)
+                passed, total = self._parse_test_output(output, project_lang)
                 return passed, total, ""
             else:
-                # Parse partial results
-                passed, total = self._parse_test_output(stdout + stderr)
+                passed, total = self._parse_test_output(output, project_lang)
                 error = stderr.strip() or stdout.strip()
                 return passed, total, error[:500]
 
         return 0, 0, ""
 
     @staticmethod
-    def _parse_test_output(output: str) -> tuple[int, int]:
-        """Parse test counts from pytest/unittest output."""
+    def _parse_test_output(output: str, language: str = "python") -> tuple[int, int]:
+        """Parse test counts from test runner output."""
 
+        if language == "python":
+            return VerifierExpert._parse_python_test_output(output)
+        elif language == "go":
+            return VerifierExpert._parse_go_test_output(output)
+        elif language == "rust":
+            return VerifierExpert._parse_rust_test_output(output)
+        elif language in ("javascript", "typescript"):
+            return VerifierExpert._parse_jest_test_output(output)
+        elif language == "java":
+            return VerifierExpert._parse_java_test_output(output)
+
+        # Fallback to Python parser
+        return VerifierExpert._parse_python_test_output(output)
+
+    @staticmethod
+    def _parse_python_test_output(output: str) -> tuple[int, int]:
+        """Parse pytest/unittest output."""
         # pytest format: "5 passed" or "3 passed, 2 failed"
         passed_match = re.search(r"(\d+) passed", output)
         failed_match = re.search(r"(\d+) failed", output)
@@ -251,7 +428,6 @@ class VerifierExpert:
                 if "OK" in output:
                     passed = total
                 else:
-                    # Try to find failures
                     fail_match = re.search(r"failures=(\d+)", output)
                     err_match = re.search(r"errors=(\d+)", output)
                     f = int(fail_match.group(1)) if fail_match else 0
@@ -259,6 +435,79 @@ class VerifierExpert:
                     passed = total - f - e
 
         return passed, total
+
+    @staticmethod
+    def _parse_go_test_output(output: str) -> tuple[int, int]:
+        """Parse go test output."""
+        # "ok" lines = passed packages, "FAIL" lines = failed packages
+        # Individual: "--- PASS: TestName" / "--- FAIL: TestName"
+        pass_count = len(re.findall(r'--- PASS:', output))
+        fail_count = len(re.findall(r'--- FAIL:', output))
+        total = pass_count + fail_count
+
+        if total == 0:
+            # Package-level: "ok  package 0.5s" / "FAIL package"
+            ok_count = len(re.findall(r'^ok\s+', output, re.MULTILINE))
+            fail_pkg = len(re.findall(r'^FAIL\s+', output, re.MULTILINE))
+            if ok_count + fail_pkg > 0:
+                return ok_count, ok_count + fail_pkg
+
+        return pass_count, total
+
+    @staticmethod
+    def _parse_rust_test_output(output: str) -> tuple[int, int]:
+        """Parse cargo test output."""
+        # "test result: ok. 5 passed; 0 failed; 0 ignored"
+        result_match = re.search(
+            r'test result:.*?(\d+) passed.*?(\d+) failed', output
+        )
+        if result_match:
+            passed = int(result_match.group(1))
+            failed = int(result_match.group(2))
+            return passed, passed + failed
+        return 0, 0
+
+    @staticmethod
+    def _parse_jest_test_output(output: str) -> tuple[int, int]:
+        """Parse Jest test output."""
+        # "Tests: 2 failed, 5 passed, 7 total"
+        tests_match = re.search(r'Tests:\s+(?:(\d+) failed,\s+)?(\d+) passed,\s+(\d+) total', output)
+        if tests_match:
+            passed = int(tests_match.group(2))
+            total = int(tests_match.group(3))
+            return passed, total
+
+        # Alternative: "X passing" / "X failing"
+        passing = re.search(r'(\d+) passing', output)
+        failing = re.search(r'(\d+) failing', output)
+        if passing:
+            p = int(passing.group(1))
+            f = int(failing.group(1)) if failing else 0
+            return p, p + f
+
+        return 0, 0
+
+    @staticmethod
+    def _parse_java_test_output(output: str) -> tuple[int, int]:
+        """Parse Maven/Gradle test output."""
+        # Maven: "Tests run: 10, Failures: 1, Errors: 0, Skipped: 0"
+        maven_match = re.search(
+            r'Tests run:\s*(\d+),\s*Failures:\s*(\d+),\s*Errors:\s*(\d+)', output
+        )
+        if maven_match:
+            total = int(maven_match.group(1))
+            failures = int(maven_match.group(2))
+            errors = int(maven_match.group(3))
+            return total - failures - errors, total
+
+        # Gradle: "X tests completed, Y failed"
+        gradle_match = re.search(r'(\d+) tests? completed,\s*(\d+) failed', output)
+        if gradle_match:
+            total = int(gradle_match.group(1))
+            failed = int(gradle_match.group(2))
+            return total - failed, total
+
+        return 0, 0
 
     def _rollback(self, backups: dict[str, str]):
         """Restore original file contents."""

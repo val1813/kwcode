@@ -1275,6 +1275,7 @@ def main(
     no_search: bool = typer.Option(False, "--no-search", help="禁用搜索增强"),
     do_init: bool = typer.Option(False, "--init", help="初始化KAIWU.md"),
     show_memory: bool = typer.Option(False, "--memory", help="查看项目记忆"),
+    tui: bool = typer.Option(False, "--tui", help="启动 TUI 界面"),
 ):
     """KwCode - 本地模型 coding agent。无参数进入交互模式。"""
 
@@ -1302,6 +1303,12 @@ def main(
         from kaiwu.memory.kaiwu_md import KaiwuMemory
         mem = KaiwuMemory()
         console.print(Panel(mem.show(project_root), title="KAIWU.md", border_style="blue"))
+        return
+
+    # ── TUI mode ──
+    if tui:
+        from kaiwu.tui.app import run_tui
+        run_tui(project_root=project_root)
         return
 
     # ── First-run onboarding (BOOT-RED-1) ──
@@ -1576,6 +1583,55 @@ def cmd_stats(
 
 
 # ── MCP serve command ────────────────────────────────────────
+
+@app.command("serve")
+def cmd_serve(
+    model: str = typer.Option(None, "--model", "-m", help="Ollama模型名称"),
+    model_path: str = typer.Option(None, "--model-path", help="本地GGUF模型路径"),
+    ollama_url: str = typer.Option("http://localhost:11434", "--ollama-url", help="Ollama服务地址"),
+    project_dir: str = typer.Option(".", "--project", "-d", help="项目根目录"),
+    port: int = typer.Option(7355, "--port", help="HTTP服务端口"),
+    host: str = typer.Option("127.0.0.1", "--host", help="HTTP服务地址"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="详细日志"),
+):
+    """启动 kwcode HTTP server (FastAPI + SSE, 端口7355)。"""
+    import uvicorn
+    from kaiwu.server.app import create_app
+    from kaiwu.cli.onboarding import load_config as _load_cfg
+
+    project_root = os.path.abspath(project_dir)
+    ollama_model = model or "qwen3-8b"
+
+    log_level = logging.DEBUG if verbose else logging.WARNING
+    if verbose:
+        logging.basicConfig(level=log_level, format="%(name)s: %(message)s")
+        logging.getLogger("kaiwu").propagate = True
+
+    # Load API key from config
+    _cfg = _load_cfg().get("default", {})
+    _api_key = _cfg.get("api_key", "")
+    if not model and _cfg.get("model"):
+        ollama_model = _cfg["model"]
+    if ollama_url == "http://localhost:11434" and _cfg.get("base_url"):
+        ollama_url = _cfg["base_url"]
+
+    console.print(f"  [bold]KwCode Server[/bold] 启动中...")
+    console.print(f"  模型: {ollama_model}")
+    console.print(f"  项目: {project_root}")
+    console.print(f"  地址: http://{host}:{port}")
+    console.print()
+
+    server_app = create_app(
+        model_path=model_path,
+        ollama_url=ollama_url,
+        ollama_model=ollama_model,
+        project_root=project_root,
+        verbose=verbose,
+        api_key=_api_key,
+    )
+
+    uvicorn.run(server_app, host=host, port=port, log_level="info" if verbose else "warning")
+
 
 @app.command("serve-mcp")
 def cmd_serve_mcp(

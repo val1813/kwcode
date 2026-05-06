@@ -18,7 +18,30 @@ logger = logging.getLogger(__name__)
 
 DB_PATH = Path.home() / ".kwcode" / "graph.db"
 
-SUPPORTED_EXTENSIONS = {".py"}  # MVP: Python only (tree-sitter-python)
+_BASE_EXTENSIONS = {".py"}  # Always supported (tree-sitter-python)
+
+# Dynamically add extensions for available tree-sitter bindings
+def _get_supported_extensions() -> set:
+    """Return supported extensions based on installed tree-sitter bindings."""
+    exts = set(_BASE_EXTENSIONS)
+    try:
+        from kaiwu.ast_engine.parser import TreeSitterParser
+        _p = TreeSitterParser()
+        lang_ext_map = {
+            "javascript": {".js", ".mjs"},
+            "typescript": {".ts", ".tsx"},
+            "go": {".go"},
+            "rust": {".rs"},
+            "java": {".java"},
+        }
+        for lang in _p.supported_languages():
+            if lang in lang_ext_map:
+                exts.update(lang_ext_map[lang])
+    except Exception:
+        pass
+    return exts
+
+SUPPORTED_EXTENSIONS = _get_supported_extensions()
 
 SKIP_DIRS = {
     ".git", "__pycache__", "node_modules", ".venv", "venv",
@@ -311,3 +334,195 @@ class GraphBuilder:
             return result.stdout.strip() if result.returncode == 0 else ""
         except Exception:
             return ""
+
+    def export_rig(self) -> dict:
+        """Scan project and output .kaiwu/rig.json with structure map."""
+        import json
+        import re
+
+        rig = {
+            "files": {},
+            "api_routes": {},
+            "test_coverage": {},
+            "frontend_api_calls": {},
+            "language_stats": {},
+        }
+
+        # --- Language stats ---
+        try:
+            from kaiwu.ast_engine.language_detector import detect_project_languages
+            rig["language_stats"] = detect_project_languages(self.project_root)
+        except Exception:
+            pass
+
+        # --- Collect all Python files (including test files) ---
+        all_py_files = []
+        for dirpath, dirnames, filenames in os.walk(self.project_root):
+            dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS and not d.startswith(".")]
+            for fname in sorted(filenames):
+                if fname.endswith(".py"):
+                    all_py_files.append(os.path.join(dirpath, fname))
+
+        # --- Parse each Python file for exports/imports/routes ---
+        re_import = re.compile(r"^\s*import\s+([\w.]+)", re.MULTILINE)
+        re_from_import = re.compile(r"^\s*from\s+([\w.]+)\s+import", re.MULTILINE)
+        re_top_def = re.compile(r"^(?:def|class)\s+(\w+)", re.MULTILINE)
+        re_route = re.compile(
+            r"@(?:app|router)\.(route|get|post|put|delete|patch)\(\s*['\"]([^'\"]+)['\"]",
+            re.MULTILINE,
+        )
+
+        for fpath in all_py_files:
+            rel_path = os.path.relpath(fpath, self.project_root).replace("\\", "/")
+            try:
+                with open(fpath, "r", encoding="utf-8", errors="replace") as f:
+                    source = f.read()
+            except Exception:
+                continue
+
+            # Exports: top-level def/class names
+            exports = re_top_def.findall(source)
+
+            # Imports: module names
+            imports = list(set(re_import.findall(source) + re_from_import.findall(source)))
+
+            if exports or imports:
+                rig["files"][rel_path] = {
+                    "exports": exports,
+                    "imports": imports,
+                }
+
+            # API routes
+            for match in re_route.finditer(source):
+                method_raw, path = match.group(1), match.group(2)
+                method = method_raw.upper() if method_raw != "route" else "GET"
+                # Find the function defined right after the decorator
+                after = source[match.end():]
+                func_match = re.search(r"^\s*def\s+(\w+)", after, re.MULTILINE)
+                func_name = func_match.group(1) if func_match else "unknown"
+                route_key = f"{method} {path}"
+                rig["api_routes"][route_key] = f"{rel_path}:{func_name}"
+
+        # --- Test coverage: match test_foo.py -> foo.py ---
+        source_files_by_name = {}
+        for rel_path in rig["files"]:
+            basename = os.path.basename(rel_path)
+            source_files_by_name[basename] = rel_path
+
+        for fpath in all_py_files:
+            rel_path = os.path.relpath(fpath, self.project_root).replace("\\", "/")
+            basename = os.path.basename(rel_path)
+            # Match test_foo.py -> foo.py
+            if basename.startswith("test_"):
+                target_name = basename[5:]  # strip "test_"
+                if target_name in source_files_by_name:
+                    target_rel = source_files_by_name[target_name]
+                    rig["test_coverage"].setdefault(target_rel, []).append(rel_path)
+
+        # --- Frontend API calls: scan .js/.ts files ---
+        re_axios_method = re.compile(
+            r"""axios\.(get|post|put|delete|patch)\(\s*[`'"]([^`'"]+)[`'"]""",
+            re.MULTILINE,
+        )
+        re_fetch_method = re.compile(
+            r"""fetch\(\s*[`'"]([^`'"]+)[`'"].*?method:\s*['\"](\w+)['\"]""",
+            re.DOTALL,
+        )
+
+        for dirpath, dirnames, filenames in os.walk(self.project_root):
+            dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS and not d.startswith(".")]
+            for fname in sorted(filenames):
+                if not fname.endswith((".js", ".ts", ".jsx", ".tsx")):
+                    continue
+                fpath = os.path.join(dirpath, fname)
+                rel_path = os.path.relpath(fpath, self.project_root).replace("\\", "/")
+                try:
+                    with open(fpath, "r", encoding="utf-8", errors="replace") as f:
+                        content = f.read()
+                except Exception:
+                    continue
+
+                # axios.post("/path", ...) style
+                for match in re_axios_method.finditer(content):
+                    method = match.group(1).upper()
+                    path = match.group(2)
+                    # Find last function/const def before this call
+                    before = content[:match.start()]
+                    func_matches = re.findall(
+                        r"(?:function\s+(\w+)|(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s*)?\(?)",
+                        before,
+                    )
+                    func_name = "anonymous"
+                    if func_matches:
+                        last = func_matches[-1]
+                        func_name = last[0] or last[1]
+                    route_key = f"{method} {path}"
+                    rig["frontend_api_calls"][route_key] = f"{rel_path}:{func_name}"
+
+                # fetch("/path", {method: "POST"}) style
+                for match in re_fetch_method.finditer(content):
+                    path = match.group(1)
+                    method = match.group(2).upper()
+                    before = content[:match.start()]
+                    func_matches = re.findall(
+                        r"(?:function\s+(\w+)|(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s*)?\(?)",
+                        before,
+                    )
+                    func_name = "anonymous"
+                    if func_matches:
+                        last = func_matches[-1]
+                        func_name = last[0] or last[1]
+                    route_key = f"{method} {path}"
+                    rig["frontend_api_calls"][route_key] = f"{rel_path}:{func_name}"
+
+        # --- Write output ---
+        out_dir = os.path.join(self.project_root, ".kaiwu")
+        os.makedirs(out_dir, exist_ok=True)
+        out_path = os.path.join(out_dir, "rig.json")
+        with open(out_path, "w", encoding="utf-8") as f:
+            json.dump(rig, f, indent=2, ensure_ascii=False)
+
+        # --- Write summary (lightweight, <5KB, for Gate/Locator prompt injection) ---
+        summary = self._build_rig_summary(rig)
+        summary_path = os.path.join(out_dir, "rig_summary.json")
+        with open(summary_path, "w", encoding="utf-8") as f:
+            json.dump(summary, f, indent=2, ensure_ascii=False)
+
+        logger.info("[graph] exported rig.json: %d files, %d routes, %d test mappings",
+                    len(rig["files"]), len(rig["api_routes"]), len(rig["test_coverage"]))
+        return rig
+
+    @staticmethod
+    def _build_rig_summary(rig: dict) -> dict:
+        """
+        生成 Gate/Locator 可注入的精简骨架。
+        只保留：api_routes、test_coverage、frontend_api_calls、文件路径列表（截断）。
+        不含详细 exports/imports，目标 <5KB。
+        """
+        import json
+
+        summary = {
+            "api_routes": rig.get("api_routes", {}),
+            "test_coverage": rig.get("test_coverage", {}),
+            "frontend_api_calls": rig.get("frontend_api_calls", {}),
+        }
+
+        # File list: only include paths, cap to keep total <5KB
+        all_files = sorted(rig.get("files", {}).keys())
+        # Budget: 4096 bytes total, subtract non-file content
+        non_file_size = len(json.dumps(summary, ensure_ascii=False))
+        file_budget = 4096 - non_file_size - 50  # 50 bytes overhead for "files" key + brackets
+        # Add files until budget exhausted
+        included = []
+        running = 0
+        for f in all_files:
+            entry_size = len(f) + 5  # quotes + comma + space
+            if running + entry_size > file_budget:
+                break
+            included.append(f)
+            running += entry_size
+        summary["files"] = included
+        if len(included) < len(all_files):
+            summary["_files_truncated"] = len(all_files)
+
+        return summary

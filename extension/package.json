@@ -1,0 +1,62 @@
+{
+  "name": "kwcode",
+  "displayName": "KwCode",
+  "description": "KwCode - Local model coding agent. Thin client connecting to kwcode server.",
+  "version": "0.1.0",
+  "publisher": "val1813",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Programming Languages", "Machine Learning"],
+  "activationEvents": [
+    "onCommand:kwcode.openPanel"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "kwcode.openPanel",
+        "title": "KwCode: Open Panel",
+        "category": "KwCode"
+      },
+      {
+        "command": "kwcode.submitTask",
+        "title": "KwCode: Submit Task",
+        "category": "KwCode"
+      }
+    ],
+    "configuration": {
+      "title": "KwCode",
+      "properties": {
+        "kwcode.serverUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:7355",
+          "description": "KwCode server URL"
+        },
+        "kwcode.autoRefreshRig": {
+          "type": "boolean",
+          "default": true,
+          "description": "Auto-refresh rig.json on file save"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "eslint src --ext ts"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.3.0",
+    "eslint": "^8.56.0",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/val1813/kwcode"
+  }
+}

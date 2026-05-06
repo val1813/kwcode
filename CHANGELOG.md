@@ -4,6 +4,81 @@ All notable changes to KWCode are documented here.
 
 ---
 
+## [1.4.0] - 2026-05-06
+
+### 多语言 + TUI + IDE兼容（3 个模块）
+
+**理论来源**：XRAY MCP Server(ast-grep选型) + OpenCode(client/server分离) + CodeCompass(工具采用率)
+
+### Added
+
+- **多语言 AST 支持**（模块A）：
+  - `ast_engine/language_detector.py`：7语言检测(Python/JS/TS/Go/Rust/Java/C#)，项目标记文件识别(go.mod/Cargo.toml/package.json/pom.xml)
+  - `ast_engine/ast_grep_engine.py`：预定义查询模板(find_function/find_class/find_imports/find_method_call)，LLM只填参数不写pattern，支持ast-grep-py绑定和CLI两种后端
+  - `ast_engine/parser.py` 扩展：TreeSitterParser 支持 JS/TS/Go/Rust/Java（可选依赖，graceful fallback）
+  - `ast_engine/graph_builder.py`：SUPPORTED_EXTENSIONS 动态扩展 + rig.json 新增 language_stats 字段
+  - `experts/verifier.py` 多语言：测试运行器(pytest/jest/go test/cargo test/mvn test/dotnet test) + 语法检查(py_compile/go vet/tsc --noEmit/cargo check/javac) + 多语言错误分类
+  - 4个新 SKILL.md：`builtin_experts/golang/`、`typescript/`、`rust/`、`java/`
+
+- **FastAPI Server + SSE**（模块B）：
+  - `server/app.py`：FastAPI 应用，端口 7355，CORS 支持
+    - `POST /api/task` → 提交任务返回 task_id
+    - `GET /api/task/{id}/events` → SSE 事件流
+    - `GET /api/health` / `GET /api/status` → 健康检查和状态
+    - `GET /api/files` / `GET /api/file` → 文件树和内容
+    - `POST /api/rig/refresh` → 重建 rig.json
+  - `server/pipeline_factory.py`：共享 pipeline 构建（CLI 和 server 复用）
+  - `server/models.py`：Pydantic 模型(TaskRequest/TaskResponse/HealthResponse/FileContent等)
+  - CLI 新增 `kwcode serve` 命令
+
+- **Textual TUI**（模块B）：
+  - `tui/app.py`：左面板(DirectoryTree + 文件预览) + 右面板(RichLog事件流 + Input任务输入)
+  - 自动检测 server 是否运行，未运行则 subprocess 启动
+  - CLI 新增 `kwcode --tui` 选项
+
+- **VSCode 插件**（模块C）：
+  - `extension/src/extension.ts`：命令注册、文件保存触发 RIG 刷新、状态栏连接指示
+  - `extension/src/server-client.ts`：SSE 客户端，连接 localhost:7355
+  - `extension/src/panel.ts`：Webview 面板，事件渲染 + 任务输入
+  - 薄客户端架构：不重复实现业务逻辑
+
+### Changed
+
+- `pyproject.toml`：新增 optional-dependencies（multilang/server/tui），full 包含所有
+- 版本号 1.3.0 → 1.4.0
+- 测试数量 357 → 424
+
+### Architecture Decisions
+
+- **ast-grep pattern 绝对不让 LLM 生成**：只用 QUERY_TEMPLATES 预定义模板，LLM 只填参数（函数名等）
+- **Server 单例 pipeline**：每个任务 asyncio.to_thread() 隔离，EventBus 事件直接推送到 SSE Queue
+- **TUI/VSCode/CLI 共享同一事件流**：三种前端都是 EventBus 的消费者
+- **所有新依赖都是 optional**：不影响现有 `pip install kwcode` 安装
+
+---
+
+## [1.3.0] - 2026-05-06
+
+### v2 架构升级（10 个模块）
+
+理论来源：Dive into Claude Code(arXiv:2604.14228) + Wink(arXiv:2602.17037) + ARCS(arXiv:2504.20434) + SpecEyes(arXiv:2603.23483) + OPENDEV(arXiv:2603.05344) + Turn-Control(arXiv:2510.16786)
+
+### Added
+
+- **EventBus 统一事件总线**：append-only 日志 + replay + wildcard 监听
+- **ToolGateway 工具权限层**：专家权限白名单 + 文件读缓存 + 脏标记
+- **错误策略路由**：按 error_type 切换重试序列（syntax/assertion/import/patch_apply/runtime/unknown）
+- **认知门控 CognitiveGate**：patch 行数递减检测边际收益递减
+- **上下文渐进压缩 GraduatedCompactor**：3层(70%/85%/95%)
+- **Plan 自动触发**：hard 任务自动生成执行计划
+- **Worktree 隔离**：git worktree / tempdir + copytree
+- **Speculative Prefetch**：Locator 完成后后台预读文件
+- **SearchRouter 意图感知搜索**：零 key 默认可用(arXiv/S2/GitHub/PyPI/Open-Meteo)
+- **Wink 自修复监控**：scope_creep/repetitive_fix/patch_miss/empty_output
+- **搜索层网络保护**：全局 try/except + search_enabled 开关
+
+---
+
 ## [1.0.7] - 2026-04-30
 
 ### 系统走查：修复 5 个问题（qwen3:8b 真实模型验证）

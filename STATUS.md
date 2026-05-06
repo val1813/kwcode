@@ -7,11 +7,48 @@
 
 ---
 
-## 当前状态：v1.3.0 (2026-05-06)
+## 当前状态：v1.4.0 (2026-05-06)
 
-357/357 测试全绿。v2 架构升级完成：EventBus + ToolGateway + 错误策略路由 + 认知门控 + 渐进压缩 + Plan自动触发 + Worktree隔离 + Speculative Prefetch + SearchRouter + Wink自修复 + 搜索层网络保护。
+424/424 测试全绿。v1.4.0 新增：多语言AST支持 + FastAPI Server + Textual TUI + VSCode插件。
 
-### v1.3.0 新增：v2 架构升级（10 个模块）
+### v1.4.0 新增：多语言 + TUI + IDE兼容（3 个模块）
+
+理论来源：XRAY MCP Server(ast-grep选型) + OpenCode(client/server分离) + CodeCompass(工具采用率)
+
+**模块A: 多语言AST支持**
+- `ast_engine/language_detector.py`：7语言检测(Python/JS/TS/Go/Rust/Java/C#)，项目标记文件识别
+- `ast_engine/ast_grep_engine.py`：预定义查询模板(find_function/find_class/find_imports/find_method_call)，LLM只填参数不写pattern
+- `ast_engine/parser.py`：TreeSitterParser扩展支持JS/TS/Go/Rust/Java（可选依赖，graceful fallback）
+- `ast_engine/graph_builder.py`：SUPPORTED_EXTENSIONS动态扩展 + rig.json新增language_stats
+- `experts/verifier.py`：多语言测试运行器(pytest/jest/go test/cargo test/mvn test) + 多语言语法检查
+- `builtin_experts/golang/SKILL.md`：Go领域知识（并发/错误处理/测试）
+- `builtin_experts/typescript/SKILL.md`：TS领域知识（类型系统/React/async）
+- `builtin_experts/rust/SKILL.md`：Rust领域知识（所有权/错误处理/tokio）
+- `builtin_experts/java/SKILL.md`：Java领域知识（Spring Boot/异常/Maven）
+
+**模块B: FastAPI Server + Textual TUI**
+- `server/app.py`：FastAPI + SSE事件流，端口7355
+  - POST /api/task → 提交任务返回task_id
+  - GET /api/task/{id}/events → SSE事件流
+  - GET /api/health, /api/status, /api/files, /api/file
+  - POST /api/rig/refresh → 重建rig.json
+- `server/pipeline_factory.py`：共享pipeline构建（CLI和server复用）
+- `server/models.py`：Pydantic模型(TaskRequest/TaskResponse/HealthResponse等)
+- `tui/app.py`：Textual TUI（左文件树+右事件流+输入框），自动启动server
+- CLI新增：`kwcode serve`命令 + `kwcode --tui`选项
+
+**模块C: VSCode插件**
+- `extension/src/extension.ts`：插件入口，命令注册，文件保存触发RIG刷新
+- `extension/src/server-client.ts`：SSE客户端，连接localhost:7355
+- `extension/src/panel.ts`：Webview面板，事件渲染+任务输入
+- 薄客户端架构：不重复实现业务逻辑，所有计算在server端
+
+**关键设计决策**
+- ast-grep pattern绝对不让LLM生成，只用QUERY_TEMPLATES预定义模板
+- Server单例pipeline，每个任务asyncio.to_thread()隔离
+- EventBus事件直接推送到SSE Queue，TUI/VSCode/CLI共享同一事件流
+- 所有新依赖都是optional（multilang/server/tui），不影响现有安装
+
 
 理论来源：Dive into Claude Code(arXiv:2604.14228) + Wink(arXiv:2602.17037) + ARCS(arXiv:2504.20434) + SpecEyes(arXiv:2603.23483) + OPENDEV(arXiv:2603.05344) + Turn-Control(arXiv:2510.16786)
 
@@ -256,14 +293,16 @@
 | E2E 真实模型 | 17 | PASS |
 | RIG模块测试 | 29 | PASS |
 | TaskCompiler测试 | 12 | PASS |
-| **合计** | **357** | **全绿** |
+| 多语言模块测试 | 51 | PASS |
+| Server/TUI测试 | 16 | PASS |
+| **合计** | **424** | **全绿** |
 
 ### 待做
 
 1. SQLite 跨 session 查询（spec §7.1 kaiwu.db）
 2. 12 个预置专家完整 benchmark（目前只跑了 BugFix+TestGen）
 3. 实时数据API提示注入（codegen涉及天气/股价时，prompt注入免费API信息，避免模型编造假数据）
-4. 多语言AST支持（JavaScript/TypeScript/Java/Go/Rust 调用图）
+4. ~~多语言AST支持~~ ✅ v1.4.0 已完成
 5. pip publish 到 PyPI
 6. install.ps1 / install.sh 一键安装脚本
 

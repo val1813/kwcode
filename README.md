@@ -10,7 +10,7 @@
 [![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://python.org)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Mac%20%7C%20Linux-lightgrey.svg)]()
 [![Multi-Platform Tests](https://github.com/val1813/kwcode/actions/workflows/test.yml/badge.svg)](https://github.com/val1813/kwcode/actions/workflows/test.yml)
-[![Version](https://img.shields.io/badge/Version-1.3.0-blue.svg)]()
+[![Version](https://img.shields.io/badge/Version-1.4.0-blue.svg)]()
 
 </div>
 
@@ -30,6 +30,7 @@
 
 | 日期 | 内容 |
 |------|------|
+| 05-06 | **v1.4.0** 多语言AST支持(Go/TS/Rust/Java + ast-grep预定义模板) + FastAPI Server(SSE端口7355) + Textual TUI(`kwcode --tui`) + VSCode插件(薄客户端) + 多语言Verifier(jest/go test/cargo test/mvn test) |
 | 05-06 | **v1.3.0** EventBus事件总线 + ToolGateway权限隔离 + 错误策略路由(按error_type切换重试序列) + 认知门控(patch行数递减检测) + 3层渐进压缩 + Plan自动触发 + Worktree并行隔离 + Speculative Prefetch + SearchRouter意图感知搜索(arxiv/S2/GitHub/PyPI/Open-Meteo零key) + Wink自修复监控 |
 | 05-06 | **v1.1.0** 熔断器+智能重试(syntax/import快速熔断+scope缩小) + Gate置信度 + Verifier结构化错误 + Experience Replay(BM25历史轨迹) + Session多轮连贯 + Locator精准裁剪 |
 | 04-30 | 三层上下文架构 + SSH持久会话 + Gate/路由优化 + PCED-Lite多源聚合 + 搜索site:自动限定 + qwen3:8b 20题真实验证 + 13项bug修复 |
@@ -101,7 +102,7 @@ KWCode 的 5 个元专家（原子能力层，固定不变）：
 ```
 
 15 个领域知识（SKILL.md 注入层，可扩展，不改变流水线）：
-BugFix · FastAPI · TestGen · API · DeepSeekAPI · Docstring · MyBatis · Office(3) · Refactor · SpringBoot · SQLOpt · TypeHint · UniApp
+BugFix · FastAPI · TestGen · API · DeepSeekAPI · Docstring · MyBatis · Office(3) · Refactor · SpringBoot · SQLOpt · TypeHint · UniApp · **Golang · TypeScript · Rust · Java**
 
 ### 原理二：BM25 + AST 调用图定位
 
@@ -118,7 +119,7 @@ BugFix · FastAPI · TestGen · API · DeepSeekAPI · Docstring · MyBatis · Of
         沿调用链追踪隐藏依赖
 ```
 
-技术实现：`tree-sitter` 多语言 AST + `rank-bm25` + `SQLite` 调用图持久化。
+技术实现：`tree-sitter` 多语言 AST + `ast-grep` 预定义模板查询 + `rank-bm25` + `SQLite` 调用图持久化。支持 Python/JavaScript/TypeScript/Go/Rust/Java（可选依赖 `pip install kwcode[multilang]`）。
 
 ### 原理三：Debug Subagent（运行时调试）
 
@@ -395,6 +396,18 @@ pip install kwcode -i https://pypi.tuna.tsinghua.edu.cn/simple
 # 可选：Cross-Encoder 搜索重排
 pip install kwcode[rerank]
 
+# 可选：多语言 AST 支持（Go/TS/Rust/Java）
+pip install kwcode[multilang]
+
+# 可选：TUI 界面
+pip install kwcode[tui]
+
+# 可选：HTTP Server（供 VSCode 插件连接）
+pip install kwcode[server]
+
+# 全部安装
+pip install kwcode[full]
+
 # 启动
 kwcode
 ```
@@ -458,6 +471,8 @@ kwcode
 ```bash
 kwcode "修复登录验证失败的问题"
 kwcode --plan "重构数据库连接层"
+kwcode --tui                          # TUI 界面
+kwcode serve                          # 启动 HTTP server（端口 7355）
 ```
 
 ### REPL 命令
@@ -515,7 +530,7 @@ git clone https://github.com/val1813/kwcode.git
 cd kwcode
 pip install -e ".[dev]"
 python -m pytest kaiwu/tests/ -v --ignore=kaiwu/tests/bench_tasks
-# 311 tests should pass
+# 424 tests should pass
 ```
 
 ### 项目结构
@@ -533,13 +548,24 @@ kaiwu/
 ├── experts/
 │   ├── locator.py           # [元专家] BM25 + 调用图定位
 │   ├── generator.py         # [元专家] 代码生成（只改必要部分）
-│   ├── verifier.py          # [元专家] 语法检查 + pytest
+│   ├── verifier.py          # [元专家] 多语言语法检查 + 测试
 │   ├── debug_subagent.py    # [元专家] 运行时调试（sys.settrace）
 │   ├── reviewer.py          # [元专家] 需求对齐审查
 │   ├── search_augmentor.py  # 搜索增强 + BM25 + CE 重排
 │   └── vision_expert.py     # [元专家] 多模态图片处理
+├── server/
+│   ├── app.py               # FastAPI + SSE 事件流（端口 7355）
+│   ├── pipeline_factory.py  # 共享 pipeline 构建
+│   └── models.py            # Pydantic 请求/响应模型
+├── tui/
+│   └── app.py               # Textual TUI（文件树 + 事件流）
+├── ast_engine/
+│   ├── parser.py            # tree-sitter 多语言 AST
+│   ├── ast_grep_engine.py   # ast-grep 预定义模板查询
+│   ├── language_detector.py # 项目语言检测
+│   └── graph_builder.py     # SQLite 调用图持久化
 ├── search/
-│   ├── reranker.py          # Cross-Encoder 可选重排
+│   ├── search_router.py     # 意图感知搜索路由
 │   ├── duckduckgo.py        # SearXNG + DDG 并行搜索
 │   └── intent_classifier.py # 意图感知分类
 ├── flywheel/
@@ -549,10 +575,15 @@ kaiwu/
 │   └── prompt_optimizer.py      # SKILL.md 领域知识自动优化
 ├── memory/
 │   └── pattern_md.py        # PATTERN.md + REFLECTION.md
-├── builtin_experts/         # 15 个 SKILL.md 领域知识目录
+├── builtin_experts/         # 19 个 SKILL.md 领域知识目录
 ├── registry/                # 专家注册表（加载 SKILL.md）
-├── ast_engine/              # tree-sitter AST + 调用图
 └── stats/                   # 价值量化（SQLite）
+
+extension/                   # VSCode 插件（薄客户端）
+├── src/extension.ts         # 插件入口
+├── src/server-client.ts     # SSE 客户端
+├── src/panel.ts             # Webview 面板
+└── package.json
 ```
 
 ---
@@ -640,7 +671,7 @@ python -m pytest kaiwu/tests/ -v --ignore=kaiwu/tests/bench_tasks
 |------|------|
 | 新增专家 | 创建 `kaiwu/builtin_experts/<name>/SKILL.md`，最简单的贡献方式 |
 | Bug 修复 | 附复现步骤和测试用例 |
-| 多语言 AST | JS/TS/Go/Rust/Java 调用图支持 |
+| 多语言 AST | JS/TS/Go/Rust/Java 调用图支持（✅ v1.4.0 已实现） |
 | 性能优化 | Locator 定位速度、ContextPruner 压缩质量 |
 
 急需认领的专家：Vue3 · React · Django · FastAPI · Go Gin · Rust Actix · K8s · Docker · MySQL · Redis

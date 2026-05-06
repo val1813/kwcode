@@ -49,11 +49,11 @@ class UpstreamManifest:
 
     def _extract_from_code(self, file_path: str, code: str):
         """Extract signatures, constants, and imports from code string."""
-        # Try AST parsing first (most accurate)
+        # 优先AST解析（最准确）
         if file_path.endswith(".py"):
             self._extract_python_ast(file_path, code)
         else:
-            # Fallback: regex extraction for non-Python
+            # 降级：非Python用正则提取
             self._extract_regex(file_path, code)
 
     def _extract_python_ast(self, file_path: str, code: str):
@@ -61,7 +61,7 @@ class UpstreamManifest:
         try:
             tree = ast.parse(code)
         except SyntaxError:
-            # Fallback to regex if AST fails
+            # AST失败时降级到正则
             self._extract_regex(file_path, code)
             return
 
@@ -70,23 +70,23 @@ class UpstreamManifest:
         imports: list[str] = []
 
         for node in ast.walk(tree):
-            # Function/method signatures
+            # 函数/方法签名
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 sig = self._format_func_signature(node)
                 sigs[node.name] = sig
 
-            # Top-level constants (UPPER_CASE assignments)
+            # 顶层常量（大写赋值）
             elif isinstance(node, ast.Assign):
                 for target in node.targets:
                     if isinstance(target, ast.Name) and target.id.isupper():
-                        # Try to get the value as string
+                        # 尝试获取值的字符串表示
                         try:
                             value = ast.literal_eval(node.value)
                             consts[target.id] = repr(value)
                         except (ValueError, TypeError):
                             consts[target.id] = "<complex>"
 
-            # Import statements
+            # import语句
             elif isinstance(node, ast.Import):
                 for alias in node.names:
                     imports.append(f"import {alias.name}")

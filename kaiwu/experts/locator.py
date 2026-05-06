@@ -76,7 +76,7 @@ class LocatorExpert:
         self.llm = llm
         self.tools = tool_executor
         self._ast_locator = ASTLocator() if _AST_ENGINE_AVAILABLE else None
-        # Graph engine (lazy init per project)
+        # 图引擎（按项目懒加载）
         self._builder: Optional[GraphBuilder] = None
         self._retriever: Optional[GraphRetriever] = None
         self._graph_project: Optional[str] = None
@@ -95,7 +95,7 @@ class LocatorExpert:
 
         if self._builder.needs_rebuild():
             if self._retriever.has_graph():
-                # Graph exists but outdated — rebuild in background, use stale graph now
+                # 图已过期，后台重建，先用旧图
                 logger.info("[locator] graph outdated, background rebuild")
                 threading.Thread(
                     target=self._builder.build_full,
@@ -103,7 +103,7 @@ class LocatorExpert:
                     name="graph-builder"
                 ).start()
             else:
-                # No graph at all — try quick synchronous build (FLEX-3: async if too slow)
+                # 无图，尝试同步快速构建
                 logger.info("[locator] no graph, attempting sync build")
                 try:
                     result = self._builder.build_full()
@@ -120,15 +120,15 @@ class LocatorExpert:
         if ctx.search_results:
             task_desc += f"\n\n参考信息：\n{ctx.search_results}"
 
-        # Ensure graph is ready
+        # 确保图已就绪
         self._ensure_graph(ctx.project_root)
 
-        # Primary path: BM25 + graph traversal
+        # 主路径：BM25 + 图遍历
         graph_result = self._graph_locate(ctx, task_desc)
         if graph_result:
             return graph_result
 
-        # Fallback: LLM file tree + AST
+        # 降级：LLM文件树 + AST
         logger.info("[locator] graph path returned nothing, falling back to LLM")
         return self._llm_locate(ctx, task_desc)
 
@@ -151,7 +151,7 @@ class LocatorExpert:
         if not results:
             return None
 
-        # Filter out results with missing keys (defensive against malformed graph data)
+        # 过滤缺失字段的结果（防御畸形图数据）
         results = [r for r in results if r.get("file_path") and r.get("name")]
         if not results:
             return None
@@ -162,7 +162,7 @@ class LocatorExpert:
         logger.info("[locator] BM25+graph: %d files %d functions",
                     len(relevant_files), len(relevant_functions))
 
-        # Store node IDs for post-task stats update
+        # 存储节点ID用于任务后统计更新
         ctx._locator_node_ids = [r["id"] for r in results]
 
         result = {
@@ -176,7 +176,7 @@ class LocatorExpert:
             "method": "bm25_graph",
         }
 
-        # Extract code snippets for Generator
+        # 为Generator提取代码片段
         code_snippets = {}
         for fpath in relevant_files[:5]:
             content = self.tools.read_file(fpath)
@@ -195,7 +195,7 @@ class LocatorExpert:
         ctx.locator_output = result
         ctx.relevant_code_snippets = code_snippets
 
-        # DocReader: inject relevant document paragraphs
+        # DocReader：注入相关文档段落
         self._inject_doc_context(ctx)
 
         # Speculative Prefetch: 后台预读文件到缓存
@@ -243,7 +243,7 @@ class LocatorExpert:
                 all_functions.extend(funcs)
                 all_locations.extend(locs)
 
-        # Extract code snippets for Generator
+        # 为Generator提取代码片段
         for fpath in files[:5]:
             content = self.tools.read_file(fpath)
             if content.startswith("[ERROR]"):
@@ -262,7 +262,7 @@ class LocatorExpert:
         ctx.locator_output = result
         ctx.relevant_code_snippets = code_snippets
 
-        # DocReader: inject relevant document paragraphs
+        # DocReader：注入相关文档段落
         self._inject_doc_context(ctx)
 
         return result

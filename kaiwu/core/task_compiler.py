@@ -75,11 +75,11 @@ class TaskCompiler:
         if not tasks:
             return {"results": {}, "success": True, "elapsed": 0.0}
 
-        # Validate and build graph
+        # 验证并构建图
         task_map = {t["id"]: t for t in tasks}
         self._validate_graph(task_map)
 
-        # Topological layers (groups of tasks that can run in parallel)
+        # 拓扑层（可并行执行的任务组）
         layers = self._topological_layers(task_map)
 
         results: dict[str, dict] = {}
@@ -87,7 +87,7 @@ class TaskCompiler:
 
         for layer in layers:
             if len(layer) == 1:
-                # Single task — run directly, no thread overhead
+                # 单任务，直接执行，无线程开销
                 task_id = layer[0]
                 task_def = task_map[task_id]
                 result = self._execute_task(task_def, results, on_status)
@@ -95,7 +95,7 @@ class TaskCompiler:
                 if not result["success"]:
                     all_success = False
             else:
-                # Parallel execution
+                # 并行执行
                 pool_size = min(len(layer), MAX_PARALLEL_WORKERS)
                 with ThreadPoolExecutor(
                     max_workers=pool_size,
@@ -137,7 +137,7 @@ class TaskCompiler:
         task_id = task_def["id"]
         user_input = task_def["input"]
 
-        # Inject dependency context: append completed task outputs to input
+        # 注入依赖上下文：将已完成任务输出追加到输入
         upstream_dict: dict = {}
         deps = task_def.get("depends_on", [])
         if deps:
@@ -146,10 +146,10 @@ class TaskCompiler:
                 upstream_text = self._format_upstream_text(upstream_dict)
                 user_input = f"{user_input}\n\n[前置任务结果]\n{upstream_text}"
 
-            # PENCIL-style: update orchestrator's manifest with upstream patches
+            # PENCIL式：用上游patch更新orchestrator的manifest
             self._update_manifest_from_deps(deps, completed)
 
-        # Gate classification (use override or auto-classify)
+        # Gate分类（使用覆盖值或自动分类）
         expert_type = task_def.get("expert_type")
         if expert_type:
             gate_result = {
@@ -170,11 +170,11 @@ class TaskCompiler:
             skip_checkpoint=True,  # 问题4修复：多任务时跳过子任务级checkpoint，避免并行竞态
         )
 
-        # Store structured upstream_summary on the context for downstream access
+        # 在context上存储结构化upstream_summary供下游访问
         if result.get("context") and upstream_dict:
             result["context"].upstream_summary = upstream_dict
 
-        # PENCIL-style compact: store only structured artifacts for downstream
+        # PENCIL式压缩：只保留结构化产物给下游
         if result.get("success") and result.get("context"):
             result["_compact"] = self._compact_subtask_result(result)
 
@@ -196,7 +196,7 @@ class TaskCompiler:
 
         modified_files = [p.get("file", "") for p in patches if p.get("file")]
 
-        # Extract signatures from modified code
+        # 从修改后的代码提取签名
         signatures = {}
         for patch in patches:
             modified = patch.get("modified", "")

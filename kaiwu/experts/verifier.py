@@ -16,8 +16,7 @@ from kaiwu.tools.executor import ToolExecutor
 
 logger = logging.getLogger(__name__)
 
-# ── Multi-language test runners ─────────────────────────────────
-# Ordered by priority: first match wins
+# 按优先级排序，首个匹配生效
 TEST_RUNNERS = {
     "python":     [
         ("pytest", "python -m pytest tests/ --tb=short -q"),
@@ -34,7 +33,7 @@ TEST_RUNNERS = {
     "csharp":     [("dotnet", "dotnet test --no-build -q")],
 }
 
-# Project marker files → language detection
+# 项目标记文件 → 语言检测
 _PROJECT_MARKERS = {
     "go.mod":              "go",
     "Cargo.toml":          "rust",
@@ -45,7 +44,7 @@ _PROJECT_MARKERS = {
     "tsconfig.json":       "typescript",
 }
 
-# Syntax check commands per extension
+# 按扩展名的语法检查命令
 _SYNTAX_CHECKS = {
     ".py":   'python -m py_compile "{file}"',
     ".go":   'go vet "{file}"',
@@ -62,7 +61,7 @@ def _detect_project_language(project_root: str, tool_executor: ToolExecutor) -> 
             for entry in entries:
                 if entry in _PROJECT_MARKERS:
                     return _PROJECT_MARKERS[entry]
-            # Check for tsconfig (overrides package.json → typescript)
+            # 检查tsconfig（覆盖package.json → typescript）
             if "tsconfig.json" in entries:
                 return "typescript"
     except Exception:
@@ -99,7 +98,7 @@ class VerifierExpert:
 
         patches = gen_output["patches"]
 
-        # Step 1: Backup original files
+        # 步骤1：备份原始文件
         backups = {}
         for patch in patches:
             fpath = patch["file"]
@@ -107,7 +106,7 @@ class VerifierExpert:
             if not original_content.startswith("[ERROR]"):
                 backups[fpath] = original_content
 
-        # Step 2: Apply patches (exact match — original is read from file, not LLM)
+        # 步骤2：应用patch（精确匹配，original从文件读取）
         apply_ok = True
         applied_files = []
         for patch in patches:
@@ -145,7 +144,7 @@ class VerifierExpert:
             ctx.verifier_output = result
             return result
 
-        # Step 3: Syntax check on modified files (multi-language)
+        # 步骤3：对修改文件做语法检查（多语言）
         syntax_ok = True
         syntax_errors = []
         for fpath in applied_files:
@@ -173,10 +172,10 @@ class VerifierExpert:
             ctx.verifier_output = result
             return result
 
-        # Step 4: Run tests (if test infrastructure exists)
+        # 步骤4：运行测试（如果有测试基础设施）
         tests_passed, tests_total, test_error = self._run_tests(ctx)
 
-        # Determine pass/fail
+        # 判定通过/失败
         passed = syntax_ok
         if tests_total > 0:
             passed = passed and (tests_passed == tests_total)

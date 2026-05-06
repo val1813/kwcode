@@ -28,9 +28,9 @@ logger = logging.getLogger(__name__)
 
 __all__ = ["SearchSubagent", "SearchResult"]
 
-# Max parallel file reads per batch
+# 每批最大并行文件读取数
 MAX_PARALLEL_READS = 8
-# Max lines per snippet returned to Generator
+# 返回给Generator的每文件最大行数
 MAX_SNIPPET_LINES = 80
 
 
@@ -84,8 +84,8 @@ class SearchSubagent:
                 "upstream_constraints": str,  # From manifest, if available
             }
         """
-        # ── Phase 1: Run locator (in its own context, results stay here) ──
-        # Create a lightweight shadow context — locator writes to this, not the real ctx
+        # 阶段1：运行locator（在自己的context中，结果留在这里）
+        # 创建轻量影子context，locator写入这里而非真实ctx
         shadow_ctx = TaskContext(
             user_input=ctx.user_input,
             project_root=ctx.project_root,
@@ -97,7 +97,7 @@ class SearchSubagent:
             reflection=ctx.reflection,
         )
 
-        # Run locator on shadow context
+        # 在影子context上运行locator
         locator_result = self._locator.run(shadow_ctx)
 
         if not locator_result:
@@ -110,16 +110,16 @@ class SearchSubagent:
                 "upstream_constraints": "",
             }
 
-        # ── Phase 2: Parallel file reading for precise snippets ──
+        # 阶段2：并行文件读取获取精确片段
         files = locator_result.get("relevant_files", [])[:5]
         functions = locator_result.get("relevant_functions", [])
 
-        # Parallel read: up to 8 files at once
+        # 并行读取：最多8个文件同时
         code_snippets = self._parallel_read_snippets(
             files, functions, ctx.project_root
         )
 
-        # ── Phase 3: Get upstream constraints from manifest ──
+        # 阶段3：从manifest获取上游约束
         upstream_constraints = ""
         if manifest and files:
             constraint_parts = []
@@ -129,8 +129,8 @@ class SearchSubagent:
                     constraint_parts.append(c)
             upstream_constraints = "\n".join(constraint_parts)
 
-        # ── Phase 4: Return clean, precise results ──
-        # Only the structured output crosses the boundary to Generator
+        # 阶段4：返回干净、精确的结果
+        # 只有结构化输出跨越边界传给Generator
         return {
             "relevant_files": files,
             "relevant_functions": functions,

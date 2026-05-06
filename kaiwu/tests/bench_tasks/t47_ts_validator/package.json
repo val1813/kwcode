@@ -1,0 +1,12 @@
+{
+  "name": "t47_ts_validator",
+  "version": "1.0.0",
+  "description": "TypeScript schema validator bench task",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "vitest": "^1.0.0",
+    "typescript": "^5.0.0"
+  }
+}

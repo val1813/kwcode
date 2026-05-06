@@ -1,0 +1,12 @@
+{
+  "name": "t49_ts_event_emitter",
+  "version": "1.0.0",
+  "description": "TypeScript event emitter bench task",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "vitest": "^1.0.0",
+    "typescript": "^5.0.0"
+  }
+}

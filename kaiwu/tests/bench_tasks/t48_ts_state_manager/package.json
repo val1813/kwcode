@@ -1,0 +1,12 @@
+{
+  "name": "t48_ts_state_manager",
+  "version": "1.0.0",
+  "description": "TypeScript state manager bench task",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "vitest": "^1.0.0",
+    "typescript": "^5.0.0"
+  }
+}

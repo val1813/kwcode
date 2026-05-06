@@ -1,0 +1,12 @@
+{
+  "name": "t50_ts_api_client",
+  "version": "1.0.0",
+  "description": "TypeScript API client bench task",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "vitest": "^1.0.0",
+    "typescript": "^5.0.0"
+  }
+}

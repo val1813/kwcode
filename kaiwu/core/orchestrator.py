@@ -36,6 +36,7 @@ EXPERT_SEQUENCES = {
     "doc":            ["locator", "generator"],
     "office":         ["office"],
     "chat":           ["chat"],
+    "vision":         ["vision"],
 }
 
 
@@ -59,6 +60,7 @@ class PipelineOrchestrator:
         ab_tester: ABTester | None = None,
         chat_expert: ChatExpert | None = None,
         debug_subagent=None,
+        vision_expert=None,
     ):
         self.locator = locator
         self.generator = generator
@@ -66,6 +68,7 @@ class PipelineOrchestrator:
         self.search_augmentor = search_augmentor
         self.office_handler = office_handler
         self.chat_expert = chat_expert
+        self.vision_expert = vision_expert
         self.tools = tool_executor
         self.memory = memory
         self.registry = registry
@@ -85,6 +88,7 @@ class PipelineOrchestrator:
         no_search: bool = False,
         skip_checkpoint: bool = False,
         pre_search_results: str = "",
+        image_paths: list = None,
     ) -> dict:
         """
         Execute the expert pipeline.
@@ -103,6 +107,11 @@ class PipelineOrchestrator:
             kaiwu_memory=self.memory.load(project_root),
             expert_system_prompt=gate_result.get("system_prompt", ""),
         )
+
+        # 处理图片路径
+        if image_paths:
+            ctx.image_paths = list(image_paths)
+            logger.info(f"[orchestrator] 任务包含 {len(image_paths)} 张图片")
 
         expert_type = gate_result.get("expert_type", "locator_repair")
 
@@ -139,6 +148,35 @@ class PipelineOrchestrator:
                 "error": None,
                 "elapsed": elapsed,
             }
+
+        # vision类型：图片处理任务
+        if expert_type == "vision":
+            self._emit(on_status, "vision", "图片处理模式")
+            if self.vision_expert and ctx.image_paths:
+                result = self.vision_expert.run(ctx)
+                explanation = result.get("output", "").strip()
+                ctx.generator_output = {
+                    "explanation": explanation,
+                    "patches": [],
+                    "metadata": {"vision": result.get("metadata", {})},
+                }
+                elapsed = time.time() - start_time
+                success = result.get("success", False)
+                return {
+                    "success": success,
+                    "context": ctx,
+                    "error": None if success else explanation or "图片处理失败",
+                    "elapsed": elapsed,
+                }
+            else:
+                ctx.generator_output = {"explanation": "图片处理功能需要配置Vision专家", "patches": []}
+                elapsed = time.time() - start_time
+                return {
+                    "success": False,
+                    "context": ctx,
+                    "error": "Vision专家未配置或未提供图片",
+                    "elapsed": elapsed,
+                }
 
         # Gate 3: AB test — check if a candidate expert should be used for this task
         ab_candidate_name = None

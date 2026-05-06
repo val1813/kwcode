@@ -64,6 +64,7 @@ _SPINNER_STAGES = {
     "search": "搜索增强中...",
     "search_done": None,
     "chat": "思考中...",
+    "vision": "分析图片...",
     "reflection": "分析失败原因...",
     "checkpoint": None,
     "warning": None,
@@ -161,6 +162,10 @@ def _build_pipeline(model_path, ollama_url, ollama_model, project_root, verbose)
     from kaiwu.experts.chat_expert import ChatExpert
     chat_expert = ChatExpert(llm=llm, search_augmentor=search)
 
+    # Vision Expert (多模态图片处理)
+    from kaiwu.experts.vision_expert import VisionExpert
+    vision_expert = VisionExpert(llm=llm, tool_executor=tools)
+
     # Debug Subagent (问题1修复：实例化并注入)
     from kaiwu.experts.debug_subagent import DebugSubagent
     debug_subagent = DebugSubagent(llm, tools)
@@ -183,6 +188,7 @@ def _build_pipeline(model_path, ollama_url, ollama_model, project_root, verbose)
         ab_tester=ab_tester,
         chat_expert=chat_expert,
         debug_subagent=debug_subagent,
+        vision_expert=vision_expert,
     )
     # Wire circular reference: ABTester needs orchestrator for backtest
     ab_tester.orchestrator = orchestrator
@@ -192,17 +198,26 @@ def _build_pipeline(model_path, ollama_url, ollama_model, project_root, verbose)
 
 # ── Single task execution ─────────────────────────────────────
 
-def _run_task(task, gate, orchestrator, memory, project_root, verbose, plan=False, no_search=False):
+def _run_task(task, gate, orchestrator, memory, project_root, verbose, plan=False, no_search=False, image_paths=None):
     """Execute a single task through the pipeline. Returns success bool."""
     from kaiwu.core.orchestrator import EXPERT_SEQUENCES
     from rich.progress import Progress, SpinnerColumn, TextColumn
+
+    # Image markers are for Gate classification only; keep the original task text
+    # for the expert prompt so paths do not pollute image analysis/codegen intent.
+    if image_paths:
+        logger.info(f"[main] 任务包含 {len(image_paths)} 张图片")
+        image_context = "\n".join([f"[图片: {img}]" for img in image_paths])
+        task_with_images = f"{task}\n\n{image_context}"
+    else:
+        task_with_images = task
 
     # Gate (with spinner)
     with Progress(SpinnerColumn(), TextColumn("{task.description}"),
                   transient=True, console=console) as progress:
         spin = progress.add_task("分析任务...", total=None)
         try:
-            gate_result = gate.classify(task, memory_context=memory.load(project_root))
+            gate_result = gate.classify(task_with_images, memory_context=memory.load(project_root))
         except Exception as e:
             progress.stop()
             console.print(f"\n  [red]❌ 模型调用失败[/red]")
@@ -218,7 +233,7 @@ def _run_task(task, gate, orchestrator, memory, project_root, verbose, plan=Fals
     diff = gate_result.get("difficulty", "easy")
 
     # ── P1-A: hard任务自动拆分 ──
-    _SKIP_DECOMPOSE_TYPES = {"chat", "office"}
+    _SKIP_DECOMPOSE_TYPES = {"chat", "office", "vision"}
     if diff == "hard" and et not in _SKIP_DECOMPOSE_TYPES:
         try:
             from kaiwu.core.planner import Planner
@@ -241,7 +256,7 @@ def _run_task(task, gate, orchestrator, memory, project_root, verbose, plan=Fals
             logger.warning("[main] 自动拆分异常: %s，走单任务", e)
 
     # Plan mode (only for high-risk tasks)
-    _SKIP_PLAN_TYPES = {"chat", "office"}
+    _SKIP_PLAN_TYPES = {"chat", "office", "vision"}
     should_plan = plan and et not in _SKIP_PLAN_TYPES
     if should_plan and et == "codegen" and diff == "easy":
         should_plan = False
@@ -288,7 +303,7 @@ def _run_task(task, gate, orchestrator, memory, project_root, verbose, plan=Fals
         try:
             # P1-B: 预搜索（Gate判断needs_search时）
             pre_search = ""
-            if gate_result.get("needs_search") and not no_search and et not in ("chat", "office"):
+            if gate_result.get("needs_search") and not no_search and et not in ("chat", "office", "vision"):
                 try:
                     from kaiwu.search.query_generator import QueryGenerator
                     from kaiwu.search.duckduckgo import search as ddg_search
@@ -309,6 +324,7 @@ def _run_task(task, gate, orchestrator, memory, project_root, verbose, plan=Fals
                 on_status=_status_fn,
                 no_search=no_search,
                 pre_search_results=pre_search,
+                image_paths=image_paths,
             )
             # 保存最后结果供conversation_history使用（问题7）
             orchestrator._last_result = result
@@ -337,6 +353,14 @@ def _run_task(task, gate, orchestrator, memory, project_root, verbose, plan=Fals
                 reply = ctx.generator_output.get("explanation", "")
             console.print(f"\n  {reply}" if reply else
                           "\n  你好！我是KWCode，专注于代码任务。有什么代码问题需要帮忙吗？")
+            return True
+
+        # Vision: print the analysis/code result directly. It is not a patch summary.
+        if et == "vision":
+            output = ""
+            if ctx.generator_output:
+                output = ctx.generator_output.get("explanation", "")
+            console.print(f"\n  {output}" if output else "\n  [yellow]图片处理完成，但没有返回内容[/yellow]")
             return True
 
         # Collect file info
@@ -382,6 +406,15 @@ def _run_task(task, gate, orchestrator, memory, project_root, verbose, plan=Fals
         # Failure output
         console.print(f"\n  [bold red]✗ 失败[/bold red] ({elapsed:.1f}s)")
         ctx = result.get("context")
+        error = result.get("error")
+        if error:
+            console.print(f"  原因：{str(error)[:200]}")
+        if ctx and ctx.generator_output and ctx.generator_output.get("explanation"):
+            lines = [l.strip() for l in ctx.generator_output["explanation"].split("\n") if l.strip()][:3]
+            if lines and not error:
+                console.print("  原因：")
+            for line in lines:
+                console.print(f"    {line[:80]}")
         if ctx and ctx.verifier_output:
             detail = ctx.verifier_output.get("error_detail", "")
             if detail:
@@ -406,6 +439,8 @@ REPL_COMMANDS = {
     "/plan":    "计划模式 (用法: /plan <任务> 或 /plan 后输入任务)",
     "/multi":   "多任务模式 (用法: /multi 后按提示输入多个任务)",
     "/api":     "API配置 (用法: /api show | /api temp <url> | /api default <url>)",
+    "/paste":   "从剪贴板粘贴图片",
+    "/image":   "添加图片文件 (用法: /image <path>)",
     "/exit":    "退出",
 }
 
@@ -443,7 +478,7 @@ def _render_header(model: str, project_root: str, registry=None):
     console.print()
 
 
-def _repl(model_path, ollama_url, ollama_model, project_root, verbose):
+def _repl(model_path, ollama_url, ollama_model, project_root, verbose, no_search=False):
     """Interactive REPL loop with prompt_toolkit bottom_toolbar."""
     from kaiwu.memory.kaiwu_md import KaiwuMemory
     from kaiwu.core.sysinfo import get_sysinfo, VRAMWatcher
@@ -640,6 +675,9 @@ def _repl(model_path, ollama_url, ollama_model, project_root, verbose):
 
             elif cmd == "/plan":
                 if arg:
+                    pending_images = list(getattr(session, '_pending_images', []))
+                    if pending_images:
+                        console.print(f"  [cyan]图片上下文: {len(pending_images)} 张图片[/cyan]")
                     # /plan <任务描述> → 直接以plan模式执行
                     task_count += 1
                     conversation_history.append({"role": "user", "content": arg})
@@ -647,8 +685,11 @@ def _repl(model_path, ollama_url, ollama_model, project_root, verbose):
                     success = _run_task(
                         task=arg, gate=gate, orchestrator=orchestrator,
                         memory=memory, project_root=project_root,
-                        verbose=verbose, plan=True, no_search=False,
+                        verbose=verbose, plan=True, no_search=no_search,
+                        image_paths=pending_images if pending_images else None,
                     )
+                    if pending_images:
+                        session._pending_images = []
                     elapsed = time.perf_counter() - t0
                     tps_estimator.record("x" * int(elapsed * 15), elapsed)
                     status.tok_per_sec = tps_estimator.value
@@ -660,6 +701,35 @@ def _repl(model_path, ollama_url, ollama_model, project_root, verbose):
 
             elif cmd == "/multi":
                 _handle_multi_command(arg, gate, orchestrator, project_root, console)
+
+            elif cmd == "/paste":
+                from kaiwu.experts.vision_expert import save_clipboard_image
+                image_path = save_clipboard_image()
+                if image_path:
+                    console.print(f"  [green]图片已从剪贴板保存: {image_path}[/green]")
+                    console.print("  [dim]现在可以输入任务描述，图片将作为上下文[/dim]")
+                    # 存储图片路径供后续任务使用
+                    if not hasattr(session, '_pending_images'):
+                        session._pending_images = []
+                    session._pending_images.append(image_path)
+                else:
+                    console.print("  [yellow]剪贴板中没有图片[/yellow]")
+
+            elif cmd == "/image":
+                if not arg:
+                    console.print("  [yellow]用法: /image <图片路径>[/yellow]")
+                else:
+                    from kaiwu.experts.vision_expert import validate_image_path
+                    image_path = _resolve_image_path(arg.strip(), project_root)
+                    if validate_image_path(image_path):
+                        console.print(f"  [green]图片已添加: {image_path}[/green]")
+                        console.print("  [dim]现在可以输入任务描述，图片将作为上下文[/dim]")
+                        # 存储图片路径供后续任务使用
+                        if not hasattr(session, '_pending_images'):
+                            session._pending_images = []
+                        session._pending_images.append(image_path)
+                    else:
+                        console.print(f"  [red]图片文件不存在或格式不支持: {image_path}[/red]")
 
             elif cmd == "/api":
                 api_parts = user_input.split()
@@ -696,6 +766,13 @@ def _repl(model_path, ollama_url, ollama_model, project_root, verbose):
                 f"耗时{pruner._last_compress_ms:.1f}ms）[/dim]"
             )
 
+        # 处理待处理的图片
+        pending_images = getattr(session, '_pending_images', [])
+        if pending_images:
+            console.print(f"  [cyan]图片上下文: {len(pending_images)} 张图片[/cyan]")
+            for img_path in pending_images:
+                console.print(f"    - {img_path}")
+
         t0 = time.perf_counter()
         # P2: Small model forces plan mode (问题6修复：用户可通过 no_search 间接控制)
         effective_plan = plan_next or (model_strategy.force_plan_mode and not no_search)
@@ -707,8 +784,14 @@ def _repl(model_path, ollama_url, ollama_model, project_root, verbose):
             project_root=project_root,
             verbose=verbose,
             plan=effective_plan,
-            no_search=False,
+            no_search=no_search,
+            image_paths=pending_images if pending_images else None,
         )
+        
+        # 清除已使用的图片
+        if pending_images:
+            session._pending_images = []
+            
         elapsed = time.perf_counter() - t0
         plan_next = False  # Reset plan flag
 
@@ -755,6 +838,14 @@ def _repl(model_path, ollama_url, ollama_model, project_root, verbose):
 def _escape_html(text: str) -> str:
     """Escape HTML special chars for prompt_toolkit HTML."""
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _resolve_image_path(path: str, project_root: str) -> str:
+    """Resolve /image paths relative to the active project directory."""
+    expanded = os.path.expanduser(path)
+    if not os.path.isabs(expanded):
+        expanded = os.path.join(project_root, expanded)
+    return os.path.abspath(expanded)
 
 
 def _handle_multi_with_tasks(tasks, gate, orchestrator, project_root, console):
@@ -1104,6 +1195,7 @@ def main(
             ollama_model=ollama_model,
             project_root=project_root,
             verbose=verbose,
+            no_search=no_search,
         )
         return
 

@@ -37,6 +37,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+rerank = ["sentence-transformers>=2.7.0"]
+multimodal = ["Pillow>=10.0"]
 local = ["llama-cpp-python>=0.2.90"]
 full = [
     "kwcode[local]",

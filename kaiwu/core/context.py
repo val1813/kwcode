@@ -53,6 +53,10 @@ class TaskContext:
     # KWCODE.md injected rules (populated by orchestrator)
     kwcode_rules: str = ""
 
+    # Vision/image context (populated by CLI/orchestrator)
+    image_paths: list[str] = field(default_factory=list)
+    image_path: str = ""
+
     # ── 多任务编排（TaskPlanner/TaskCompiler使用）──
     # 子任务执行结果，供下游子任务读取
     # shape: {"t1": {"success": bool, "files_modified": [...], "explanation": str, "patches": [...], "search_data": str}}

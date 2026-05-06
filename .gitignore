@@ -7,3 +7,4 @@ build/
 .pytest_cache/
 test_project/
 .eggs/
+.DS_Store

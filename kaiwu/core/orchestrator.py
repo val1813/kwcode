@@ -264,10 +264,10 @@ class PipelineOrchestrator:
             if ctx.verifier_output:
                 error_detail = ctx.verifier_output.get("error_detail", "")
 
-            # Save failure info for retry strategy
+            # 保存失败信息用于重试策略
             ctx.previous_failure = error_detail
 
-            # ── CognitiveGate: 检测边际收益递减 ──
+            # CognitiveGate: 检测边际收益递减
             if ctx.generator_output:
                 self._cognitive_gate.record(ctx.generator_output.get("patches", []))
             cg_stop, cg_reason = self._cognitive_gate.should_stop()
@@ -276,7 +276,7 @@ class PipelineOrchestrator:
                 self.bus.emit("circuit_break", {"msg": cg_reason})
                 break
 
-            # ── Circuit breaker: same error_type streak ──
+            # Circuit breaker: same error_type streak
             current_error_type = ""
             if ctx.verifier_output:
                 current_error_type = ctx.verifier_output.get("error_type", "unknown")
@@ -289,7 +289,7 @@ class PipelineOrchestrator:
             else:
                 ctx._error_type_streak = {"type": current_error_type, "count": 1}
 
-            # Fast circuit break: syntax errors don't improve with retries
+            # 快速熔断：语法错误重试无效
             if current_error_type == "syntax" and ctx.retry_count >= 1:
                 self._emit(on_status, "circuit_break", "语法错误重试无效，模型能力不足以完成此任务")
                 self.bus.emit("circuit_break", {"msg": "syntax error"})
@@ -302,19 +302,19 @@ class PipelineOrchestrator:
                     self._emit(on_status, "circuit_break", f"缺少依赖：{missing}，请先安装")
                     self.bus.emit("circuit_break", {"msg": f"import: {missing}"})
                     break
-                # import_fixer succeeded, continue retry loop
-            # Hard circuit break: same error type 3 times in a row
+                # import修复成功，继续重试
+            # 硬熔断：同类错误连续3次
             if ctx._error_type_streak["count"] >= 3:
                 self._emit(on_status, "circuit_break",
                            f"同类错误({current_error_type})连续{ctx._error_type_streak['count']}次，停止重试")
                 self.bus.emit("circuit_break", {"msg": f"{current_error_type} x{ctx._error_type_streak['count']}"})
                 break
 
-            # ── Wink 自修复：检测偏离并注入纠正 ──
+            # Wink 自修复：检测偏离并注入纠正
             wink_hint = self._wink.check(ctx, self.bus)
 
-            # ── 错误策略路由：按 error_type 切换重试序列 ──
-            # contract_violation uses same strategy as runtime (re-locate + re-generate)
+            # 错误策略路由：按 error_type 切换重试序列
+            # contract_violation走patch_apply策略（重新定位+重新生成）
             if current_error_type == "contract_violation":
                 current_error_type = "patch_apply"  # Re-locate to get fresh context
             retry_strategy = RETRY_STRATEGIES.get(current_error_type, RETRY_STRATEGIES["unknown"])
@@ -323,7 +323,7 @@ class PipelineOrchestrator:
             if wink_hint:
                 ctx.retry_hint = (ctx.retry_hint + "\n" + wink_hint).strip() if ctx.retry_hint else wink_hint
 
-            # ── Scope narrowing: on 2nd failure, reduce to first file+function ──
+            # Scope narrowing: on 2nd failure, reduce to first file+function
             if ctx.retry_count == 2 and ctx.locator_output:
                 files = ctx.locator_output.get("relevant_files", [])
                 funcs = ctx.locator_output.get("relevant_functions", [])
@@ -344,18 +344,18 @@ class PipelineOrchestrator:
             self._emit(on_status, "retry", f"第{ctx.retry_count}次尝试失败：{error_detail[:100]}")
             self.bus.emit("retry", {"count": ctx.retry_count, "error": error_detail[:100]})
 
-            # Reflection before 2nd retry: ask LLM why the patch failed
+            # 第2次重试前反思：让LLM分析失败原因
             if ctx.retry_count == 1 and ctx.verifier_output and ctx.generator_output:
                 self._do_reflection(ctx, on_status)
 
-            # Debug Subagent: capture runtime info on failure (test failures only)
+            # Debug子代理：捕获运行时信息（仅测试失败时）
             if ctx.retry_count >= 1 and ctx.verifier_output:
                 self._do_debug(ctx, on_status)
 
-            # Set retry strategy: each retry uses a different approach
+            # 设置重试策略：每次重试用不同方法
             ctx.retry_strategy = ctx.retry_count  # 0→1→2
 
-            # ── 错误驱动搜索：按失败类型决定是否搜索（网络保护：异常不阻塞）──
+            # 错误驱动搜索：按失败类型决定是否搜索（网络保护：异常不阻塞）
             if self._should_search(current_error_type, ctx.retry_count) and not ctx.search_triggered and not no_search:
                 try:
                     self._emit(on_status, "search", f"搜索 {current_error_type} 解法...")
@@ -377,7 +377,7 @@ class PipelineOrchestrator:
             ctx.generator_output = None
             ctx.verifier_output = None
             ctx.relevant_code_snippets = {}
-            # Clear ephemeral debug info to prevent context pollution
+            # 清除临时调试信息，防止context污染
             ctx.debug_info = ""
 
         _watchdog.cancel()  # Clean up watchdog timer
@@ -445,7 +445,7 @@ class PipelineOrchestrator:
             if candidate_def:
                 ab_candidate_name = candidate_def["name"]
                 ab_used_new = True
-                # Override gate_result to use the candidate expert's pipeline
+                # 覆盖gate_result使用候选专家流水线
                 gate_result = {
                     **gate_result,
                     "expert_name": ab_candidate_name,
@@ -455,7 +455,7 @@ class PipelineOrchestrator:
                 }
                 self._emit(on_status, "ab_test", f"AB测试：使用候选专家 {ab_candidate_name}")
             else:
-                # Check if any candidate is in AB testing for this type (baseline run)
+                # 检查是否有候选专家在AB测试中（基线对照）
                 for name, info in self.ab_tester._candidates.items():
                     if (info["status"] == "ab_testing"
                             and info["expert_def"].get("type") == expert_type
@@ -469,7 +469,7 @@ class PipelineOrchestrator:
     def _prepare_context(self, ctx: TaskContext, gate_result: dict, expert_type: str,
                          user_input: str, project_root: str, no_search: bool, on_status) -> None:
         """Experience replay + pre-search + plan generation."""
-        # ── Experience Replay: find similar successful trajectories ──
+        # Experience Replay: find similar successful trajectories
         if self.trajectory_collector and expert_type not in ("chat", "office", "vision"):
             try:
                 similar = self.trajectory_collector.find_similar(user_input, expert_type, k=3)
@@ -493,7 +493,7 @@ class PipelineOrchestrator:
             except Exception as e:
                 logger.debug("Pre-search failed (网络保护，不阻塞): %s", e)
 
-        # ── Plan 自动触发：hard 任务自动生成计划（不打断用户）──
+        # Plan 自动触发：hard 任务自动生成计划（不打断用户）
         if (gate_result.get("difficulty") == "hard"
                 and expert_type not in ("chat", "office", "vision")
                 and not ctx.subtask_results):
@@ -522,19 +522,19 @@ class PipelineOrchestrator:
         # Reviewer: 需求对齐审查（非阻塞，不影响成功判定）
         review_result = self._do_review(ctx, on_status)
 
-        # Save to memory on success (with elapsed for expert/pattern tracking)
+        # 成功时保存记忆（含耗时，用于专家/模式追踪）
         self.memory.save(project_root, ctx, elapsed=elapsed)
-        # Update expert registry stats
+        # 更新专家注册表统计
         expert_name = gate_result.get("expert_name")
         if expert_name and self.registry:
             self.registry.update_stats(expert_name, success=True, latency=elapsed)
-        # Flywheel: record trajectory and detect patterns (non-blocking)
+        # 飞轮：记录轨迹+检测模式（非阻塞）
         self._record_trajectory(ctx, True, elapsed, on_status)
-        # Gate 3: record AB test result if this task is part of an AB test
+        # 记录AB测试结果
         self._record_ab_result(ab_candidate_name, ab_used_new, True, elapsed, on_status)
-        # P2: Value tracking (local SQLite)
+        # 价值追踪（本地SQLite）
         self._record_value(project_root, gate_result, True, elapsed, ctx)
-        # P2: Milestone check
+        # 里程碑检查
         self._check_milestone(on_status)
         # Reflexion持久化：成功时也记录注意事项
         self._persist_reflection(project_root, ctx, gate_result, success=True)
@@ -550,25 +550,25 @@ class PipelineOrchestrator:
                                elapsed: float, checkpoint, checkpoint_saved: bool,
                                on_status) -> dict:
         """Record failure: checkpoint restore, memory, registry, trajectory, AB, value, reflection."""
-        # ── Checkpoint: restore on failure ──
+        # Checkpoint: restore on failure
         if checkpoint_saved:
             restored = checkpoint.restore()
             if restored:
                 self._emit(on_status, "checkpoint", "已还原到任务执行前的状态")
             else:
                 self._emit(on_status, "warning", "还原失败，请手动检查文件")
-        # Downgrade suggestion
+        # 降级建议
         self._suggest_downgrade(ctx, on_status)
 
-        # Record failure in pattern memory
+        # 记录失败到模式记忆
         self.memory.save_failure(project_root, ctx, elapsed=elapsed)
-        # Update expert registry stats on failure
+        # 失败时更新专家统计
         expert_name = gate_result.get("expert_name")
         if expert_name and self.registry:
             self.registry.update_stats(expert_name, success=False, latency=elapsed)
-        # Flywheel: record failure trajectory
+        # 飞轮：记录失败轨迹
         self._record_trajectory(ctx, False, elapsed, on_status)
-        # Gate 3: record AB test failure if this task is part of an AB test
+        # 记录AB测试失败
         self._record_ab_result(ab_candidate_name, ab_used_new, False, elapsed, on_status)
         # P2: Value tracking (local SQLite)
         self._record_value(project_root, gate_result, False, elapsed, ctx)
@@ -586,12 +586,12 @@ class PipelineOrchestrator:
         for step in sequence:
             if step == "locator":
                 self._emit(on_status, "locator", "定位中（隔离搜索）...")
-                # Use SearchSubagent: isolated context, parallel reads
+                # 使用SearchSubagent：隔离context，并行读取
                 search_result = self._search_subagent.search(ctx, self._manifest)
                 if not search_result or not search_result.get("relevant_files"):
                     self._emit(on_status, "locator_fail", "定位失败")
                     return False
-                # Transfer clean results to ctx (Generator only sees these)
+                # 将干净结果传给ctx（Generator只看到这些）
                 ctx.locator_output = {
                     "relevant_files": search_result["relevant_files"],
                     "relevant_functions": search_result["relevant_functions"],
@@ -599,7 +599,7 @@ class PipelineOrchestrator:
                     "method": search_result["method"],
                 }
                 ctx.relevant_code_snippets = search_result["code_snippets"]
-                # Inject upstream constraints for Generator
+                # 注入跨文件契约给Generator
                 if search_result.get("upstream_constraints"):
                     ctx.upstream_constraints = search_result["upstream_constraints"]
                 files = search_result["relevant_files"]
@@ -615,12 +615,12 @@ class PipelineOrchestrator:
                     return False
                 n_patches = len(result.get("patches", []))
                 self._emit(on_status, "generator_done", f"生成{n_patches}个patch")
-                # Update manifest with new patches (for cross-file tracking)
+                # 用新patch更新manifest（跨文件追踪）
                 self._manifest.update(result.get("patches", []))
 
             elif step == "verifier":
                 self._emit(on_status, "verifier", "验证中...")
-                # Cross-file consistency check before running tests
+                # 运行测试前做跨文件一致性检查
                 contract_violations = self._check_contracts(ctx)
                 if contract_violations:
                     detail = "; ".join(contract_violations[:3])
@@ -678,7 +678,7 @@ class PipelineOrchestrator:
         try:
             model = getattr(self, '_model_name', 'unknown')
             self.trajectory_collector.record(ctx, success, elapsed, model)
-            # On success, check for flywheel candidates
+            # 成功时检查飞轮候选
             if success and self._pattern_detector:
                 candidates = self._pattern_detector.detect()
                 if candidates:
@@ -697,7 +697,7 @@ class PipelineOrchestrator:
             self._emit(on_status, "ab_test_record",
                        f"AB结果已记录：{'候选' if used_new else '基线'} "
                        f"{'成功' if success else '失败'} ({total}/10)")
-            # Auto-graduation is handled inside record_ab_result when total >= 10
+            # 自动毕业在record_ab_result内处理（总数>=10时）
             status = self.ab_tester._candidates.get(candidate_name, {}).get("status", "")
             if status == "graduated":
                 self._emit(on_status, "ab_graduated",

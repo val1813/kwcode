@@ -123,12 +123,12 @@ class LocatorExpert:
         # Ensure graph is ready
         self._ensure_graph(ctx.project_root)
 
-        # ── Primary path: BM25 + graph traversal ──────────────────
+        # Primary path: BM25 + graph traversal
         graph_result = self._graph_locate(ctx, task_desc)
         if graph_result:
             return graph_result
 
-        # ── Fallback: LLM file tree + AST ─────────────────────────
+        # Fallback: LLM file tree + AST
         logger.info("[locator] graph path returned nothing, falling back to LLM")
         return self._llm_locate(ctx, task_desc)
 
@@ -195,10 +195,10 @@ class LocatorExpert:
         ctx.locator_output = result
         ctx.relevant_code_snippets = code_snippets
 
-        # ── DocReader: inject relevant document paragraphs ──
+        # DocReader: inject relevant document paragraphs
         self._inject_doc_context(ctx)
 
-        # ── Speculative Prefetch: 后台预读文件到缓存 ──
+        # Speculative Prefetch: 后台预读文件到缓存
         self._prefetch(relevant_files[:5])
 
         return result
@@ -262,7 +262,7 @@ class LocatorExpert:
         ctx.locator_output = result
         ctx.relevant_code_snippets = code_snippets
 
-        # ── DocReader: inject relevant document paragraphs ──
+        # DocReader: inject relevant document paragraphs
         self._inject_doc_context(ctx)
 
         return result

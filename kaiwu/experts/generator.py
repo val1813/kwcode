@@ -18,7 +18,6 @@ from kaiwu.tools.executor import ToolExecutor
 
 logger = logging.getLogger(__name__)
 
-# ── Model behavior guards (distilled from cl-v2, adapted for KWCode tools) ──
 GENERATOR_BASE_SYSTEM = """## 行为准则
 Anti-Overengineering:
 - 只做任务要求的事。bug修复=修bug，不要顺手重构周围代码。
@@ -42,7 +41,6 @@ Output Format:
 - 输出被截断时（"缺少必填参数"错误），拆成更小的片段。
 """
 
-# ── Web design rules (distilled from cl-v2 web.md scene) ──────────────────
 WEB_DESIGN_RULES = """\
 ## 网页设计规范（生成HTML/CSS时必须遵守）
 
@@ -98,7 +96,7 @@ WEB_DESIGN_RULES = """\
 - 移动端响应式，不溢出
 """
 
-# Web task detection keywords
+# 网页任务检测关键词
 _WEB_KEYWORDS = {"html", "css", "web", "网页", "页面", "前端", "界面", "landing",
                  "website", "网站", "落地页", "登录页", "注册页", "dashboard", "tailwind"}
 
@@ -158,8 +156,6 @@ GENERATOR_TEST_PROMPT = """你是测试生成专家。为下面的代码生成 p
 4. 只输出代码，不要解释
 5. 不要用markdown代码块包裹"""
 
-
-# ── Language detection for filename extension ────────────────
 
 _LANG_KEYWORDS = {
     ".html": ["html", "网页", "页面", "web page", "webpage", "website", "前端页面"],

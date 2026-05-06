@@ -13,7 +13,7 @@ __all__ = ["TaskContext"]
 class TaskContext:
     """Immutable-ish context flowing through the pipeline. Each expert owns its output field."""
 
-    # Input (set once at pipeline start)
+    # 输入（流水线启动时设置一次）
     user_input: str = ""
     project_root: str = "."
     gate_result: dict = field(default_factory=dict)
@@ -31,10 +31,10 @@ class TaskContext:
     verifier_output: Optional[dict] = None
     # Expected shape: {"passed": bool, "syntax_ok": bool, "tests_passed": int, "tests_total": int, "error_detail": ...}
 
-    # Expert system prompt (injected when routed via expert registry)
+    # 专家系统提示词（通过注册表路由时注入）
     expert_system_prompt: str = ""
 
-    # Retry / search state
+    # 重试/搜索状态
     retry_count: int = 0
     retry_strategy: int = 0       # 0=正常/1=从错误出发/2=最小化修改
     previous_failure: str = ""    # 上次失败的error_detail
@@ -42,20 +42,20 @@ class TaskContext:
     search_triggered: bool = False
     search_results: str = ""
 
-    # Collected file contents (populated by Locator for Generator use)
+    # 收集的文件内容（Locator填充，Generator使用）
     relevant_code_snippets: dict = field(default_factory=dict)
     # shape: {"path/to/file.py": "code content around target function"}
 
-    # Document context (populated by DocReader via Locator)
+    # 文档上下文（DocReader通过Locator填充）
     doc_context: str = ""
 
-    # Debug Subagent output (populated by orchestrator on retry)
+    # Debug子代理输出（orchestrator重试时填充）
     debug_info: str = ""
 
-    # KWCODE.md injected rules (populated by orchestrator)
+    # KWCODE.md注入规则（orchestrator填充）
     kwcode_rules: str = ""
 
-    # Vision/image context (populated by CLI/orchestrator)
+    # 图片上下文（CLI/orchestrator填充）
     image_paths: list[str] = field(default_factory=list)
     image_path: str = ""
 
@@ -71,11 +71,11 @@ class TaskContext:
     upstream_summary: dict = field(default_factory=dict)
     # shape: {"modified_files": [...], "diffs": {...}, "new_symbols": [...], "broken_interfaces": [...]}
 
-    # Experience Replay: similar successful trajectories from history
+    # 经验回放：历史相似成功轨迹
     similar_trajectories: list = field(default_factory=list)
 
-    # SearchSubagent: cross-file constraints injected into Generator prompt
+    # SearchSubagent跨文件契约，注入Generator prompt
     upstream_constraints: str = ""
 
-    # Retry hint: error-specific guidance injected into Generator prompt
+    # 重试提示：按错误类型生成的指导，注入Generator prompt
     retry_hint: str = ""

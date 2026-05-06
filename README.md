@@ -10,7 +10,7 @@
 [![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://python.org)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Mac%20%7C%20Linux-lightgrey.svg)]()
 [![Multi-Platform Tests](https://github.com/val1813/kwcode/actions/workflows/test.yml/badge.svg)](https://github.com/val1813/kwcode/actions/workflows/test.yml)
-[![Version](https://img.shields.io/badge/Version-1.4.0-blue.svg)]()
+[![Version](https://img.shields.io/badge/Version-1.5.0-blue.svg)]()
 
 </div>
 
@@ -30,6 +30,7 @@
 
 | 日期 | 内容 |
 |------|------|
+| 05-06 | **v1.5.0** SearchSubagent隔离搜索(独立context窗口+并行读取) + UpstreamManifest跨文件契约(AST提取签名/常量，零LLM) + PENCIL式context压缩 + Verifier跨文件一致性检查 + orchestrator run()拆分(410→253行) + CLI拆分(1861→173行) + ruff/mypy配置 |
 | 05-06 | **v1.4.0** 多语言AST支持(Go/TS/Rust/Java + ast-grep预定义模板) + FastAPI Server(SSE端口7355) + Textual TUI(`kwcode --tui`) + VSCode插件(薄客户端) + 多语言Verifier(jest/go test/cargo test/mvn test) |
 | 05-06 | **v1.3.0** EventBus事件总线 + ToolGateway权限隔离 + 错误策略路由(按error_type切换重试序列) + 认知门控(patch行数递减检测) + 3层渐进压缩 + Plan自动触发 + Worktree并行隔离 + Speculative Prefetch + SearchRouter意图感知搜索(arxiv/S2/GitHub/PyPI/Open-Meteo零key) + Wink自修复监控 |
 | 05-06 | **v1.1.0** 熔断器+智能重试(syntax/import快速熔断+scope缩小) + Gate置信度 + Verifier结构化错误 + Experience Replay(BM25历史轨迹) + Session多轮连贯 + Locator精准裁剪 |
@@ -190,7 +191,27 @@ Prompt Optimizer（可选，需 Anthropic API key）：
 | 10-30B（qwen3:14b） | 可选计划 · 任务范围≤4文件 · 第2次失败触发搜索 |
 | >30B（qwen3:72b） | 宽松策略 · 任务范围≤8文件 · 自动处理复杂任务 |
 
-### 原理八：EventBus 统一事件系统（v1.3.0）
+### 原理八：SearchSubagent 隔离搜索 + 跨文件契约（v1.5.0）
+
+**理论来源**：WarpGrep（隔离搜索子代理减少context rot 70%）；CGM（图结构注入注意力，Qwen2.5-72B达43% SWE-bench Lite）；PENCIL（生成后擦除中间状态）；SWE-ContextBench（上下文质量 > 模型参数量）
+
+```
+SearchSubagent（独立context窗口）：
+  搜索中间状态永远不进入Generator工作记忆
+  并行文件读取：ThreadPoolExecutor，8个并发
+  只返回精确结果：{file, start_line, end_line, content}
+
+UpstreamManifest（跨文件契约追踪）：
+  确定性AST提取：函数签名 + 常量 + import依赖
+  Generator prompt注入跨文件约束，模型不用猜接口
+  Verifier前置检查：参数数量/常量一致性（零LLM）
+
+PENCIL式压缩：
+  子任务完成 → 只保留签名/常量/文件路径/测试状态
+  下游子任务拿到结构化摘要，不是完整推理链
+```
+
+### 原理九：EventBus 统一事件系统（v1.3.0）
 
 **理论来源**：Event Sourcing（Martin Fowler）；CC 27 个 hook 事件（arXiv:2604.14228）；Codified Context append-only 日志（arXiv:2602.20478）
 
@@ -203,7 +224,7 @@ Prompt Optimizer（可选，需 Anthropic API key）：
 append-only 日志支持 replay/时间旅行调试
 ```
 
-### 原理九：错误策略路由 + 认知门控（v1.3.0）
+### 原理十：错误策略路由 + 认知门控（v1.3.0）
 
 **理论来源**：Turn-Control Strategies（arXiv:2510.16786）动态预算比固定预算好 12-24%；SpecEyes（arXiv:2603.23483）认知门控
 
@@ -214,12 +235,13 @@ append-only 日志支持 replay/时间旅行调试
   runtime   → [debugger, generator, verifier]（先debug再修）
   patch_apply → [locator, generator, verifier]（重新定位）
   assertion → [generator, verifier]（2次后搜索）
+  contract_violation → [locator, generator, verifier]（跨文件契约冲突）
 
 认知门控：patch行数持续递减 → 边际收益递减 → 自动停止
 Wink监控：scope_creep/repetitive_fix/patch_miss → 注入纠正hint
 ```
 
-### 原理十：ToolGateway 权限隔离（v1.3.0）
+### 原理十一：ToolGateway 权限隔离（v1.3.0）
 
 **理论来源**：CC 工具沙箱隔离（arXiv:2604.14228）；deny-first 权限模型
 

@@ -122,13 +122,13 @@ def test_search_triggers_after_2_failures(tmp_path):
 
     result = orch.run(
         user_input="fix bug",
-        gate_result={"expert_type": "locator_repair", "difficulty": "easy"},
+        gate_result={"expert_type": "locator_repair", "difficulty": "hard"},
         project_root=str(tmp_path),
         no_search=False,
     )
 
     assert result["success"] is False
-    # Search should have been called after 2 failures
+    # Search should have been called after failures (hard task triggers earlier)
     assert search.search.called
 
 

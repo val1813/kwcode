@@ -7,9 +7,101 @@
 
 ---
 
-## 当前状态：v1.1.0 (2026-05-06)
+## 当前状态：v1.3.0 (2026-05-06)
 
-328/328 测试全绿（不含bench_tasks存根）。P0+P1+P2优化全部完成，spec关闭。
+357/357 测试全绿。v2 架构升级完成：EventBus + ToolGateway + 错误策略路由 + 认知门控 + 渐进压缩 + Plan自动触发 + Worktree隔离 + Speculative Prefetch + SearchRouter + Wink自修复 + 搜索层网络保护。
+
+### v1.3.0 新增：v2 架构升级（10 个模块）
+
+理论来源：Dive into Claude Code(arXiv:2604.14228) + Wink(arXiv:2602.17037) + ARCS(arXiv:2504.20434) + SpecEyes(arXiv:2603.23483) + OPENDEV(arXiv:2603.05344) + Turn-Control(arXiv:2510.16786)
+
+**模块1: EventBus 统一事件总线** (`core/event_bus.py`)
+- append-only 日志支持 replay/时间旅行调试
+- on/off/emit 三个核心方法，wildcard "*" 监听所有事件
+- CLI 接入追加式渲染（EVENT_ICONS 17种事件图标）
+
+**模块2: ToolGateway 工具权限层** (`tools/tool_gateway.py`)
+- 专家权限白名单（generator只读不写，verifier可写可执行）
+- 文件读缓存 + 脏标记（写后自动失效缓存）
+- 所有工具调用通过 EventBus 可观测
+
+**模块3: 错误策略路由** (`core/orchestrator.py` RETRY_STRATEGIES)
+- 按 error_type 切换重试序列（syntax/assertion/import/patch_apply/runtime/unknown）
+- import 错误：确定性修复器 `tools/import_fixer.py`（不调LLM）
+- _build_retry_hint() 按错误类型生成精准重试提示
+- _should_search() 按失败类型决定是否搜网络（不再统一 retry>=2 时搜）
+
+**模块4: 认知门控 CognitiveGate** (`core/cognitive_gate.py`)
+- patch 行数持续递减 → 边际收益递减 → 自动停止
+- 连续输出相同行数 → 原地打转 → 自动停止
+- 最后一次极小(≤3行) → 模型无从下手 → 自动停止
+
+**模块5: 上下文渐进压缩 GraduatedCompactor** (`core/context_pruner.py`)
+- Layer 1 (70%): 裁剪 tool 输出冗余（>500 token 提取关键词）
+- Layer 2 (85%): 复用 ContextPruner 压缩中间轮次
+- Layer 3 (95%): 摘要化早期对话，只保留关键决策
+
+**模块6: Plan 自动触发** (`core/orchestrator.py`)
+- hard 任务自动生成执行计划（不打断用户）
+- 低中风险直接执行，高风险暂停确认
+
+**模块7: Worktree 隔离** (`core/task_compiler.py` WorktreeManager)
+- Git 项目：git worktree 隔离
+- 非 Git 项目：tempdir + copytree
+- cleanup() 支持 merge 回主分支
+
+**模块8: Speculative Prefetch** (`experts/locator.py`)
+- Locator 完成后后台线程预读文件到内存
+- 减少 Generator 阶段 IO 等待
+
+**模块9: SearchRouter 意图感知搜索** (`search/search_router.py`)
+- 零 key 默认可用：arXiv / Semantic Scholar / GitHub REST / PyPI JSON / Open-Meteo
+- 按意图路由：research/code_solution/code_example/weather/library_doc/general
+- 可选 Tavily key 提升通用搜索质量
+- 错误驱动搜索接入 orchestrator
+
+**模块10: Wink 自修复监控** (`core/wink.py`)
+- scope_creep: easy任务定位>5文件 → 纠正
+- repetitive_fix: 同类错误≥2次 → 换思路
+- patch_miss: patch_apply失败 → 重新读文件
+- empty_output: Generator无输出 → 简化任务
+
+**搜索层网络保护补丁**
+- duckduckgo.py: DDG为主，SearXNG为可选增强，不自动拉起Docker
+- search_augmentor.py: 全局 try/except 保护，任何网络问题返回空
+- orchestrator.py: 搜索结果为空不阻塞，异常不中断重试流程
+- config.yaml: search_enabled 开关（环境变量 KWCODE_SEARCH_ENABLED）
+- 内网/离线用户设置 false 永远不触发网络请求
+
+### v1.2.0 新增：RIG侦察层（Project Map）
+
+理论来源：RIG(arXiv:2601.10112) + FastCode(arXiv:2603.01012) + CodeCompass工具采用率研究
+
+**RIG-1: export_rig() 仓库结构索引** (`ast_engine/graph_builder.py`)
+- 扫描全项目Python文件提取exports/imports（regex，零LLM）
+- 检测Flask/FastAPI路由装饰器 → api_routes
+- 匹配test_foo.py → foo.py → test_coverage
+- 扫描.js/.ts文件检测axios/fetch调用 → frontend_api_calls
+- 双文件输出：.kaiwu/rig.json（完整索引）+ .kaiwu/rig_summary.json（精简骨架<5KB）
+- 精简骨架动态截断文件列表，保证注入Gate/Locator不爆context
+
+**RIG-2: upstream_summary结构化** (`core/context.py` + `core/task_compiler.py`)
+- upstream_summary从str改为dict: {modified_files, diffs, new_symbols, broken_interfaces}
+- TaskCompiler自动提取上游patch的文件/diff/新符号，结构化传递给下游子任务
+- 新增_format_upstream_text()将结构化dict转为LLM可读文本注入prompt
+- 下游子任务Locator可直接读取"哪些文件被改了"，不靠模型猜
+
+**RIG-3: ConsistencyChecker前后端一致性检查** (`experts/consistency_checker.py`)
+- 基于rig.json做确定性集合对比（不调LLM）
+- 输出backend_only/frontend_only/matched不一致清单
+- check_with_details()带文件位置信息，可直接作为子任务输入
+- format_for_subtask()生成可注入Generator的文本
+
+**RIG-4: Gate/Locator prompt显式引导查rig** (`core/gate.py` + `experts/locator.py`)
+- Gate prompt新增显式引导："优先参考.kaiwu/rig.json理解项目结构"
+- Locator prompt新增{rig_context}占位符
+- _load_rig_context()读取rig_summary.json（不是完整rig.json），注入路由/前端调用/测试覆盖摘要
+- 解决CodeCompass发现的工具采用率42%问题：模型不查图的根因是prompt没引导
 
 ### v1.1.0 新增：P0+P1+P2 全量优化
 
@@ -162,7 +254,9 @@
 | 搜索重构测试 | 19 | PASS |
 | 意图搜索测试 | 19 | PASS |
 | E2E 真实模型 | 17 | PASS |
-| **合计** | **282** | **全绿** |
+| RIG模块测试 | 29 | PASS |
+| TaskCompiler测试 | 12 | PASS |
+| **合计** | **357** | **全绿** |
 
 ### 待做
 
@@ -191,29 +285,35 @@ kwcode/
 ├── STATUS.md
 └── kaiwu/
     ├── cli/
-    │   ├── main.py              # REPL + spinner + 结果摘要 + 重影Header + setup-search
+    │   ├── main.py              # REPL + EventBus追加式渲染 + spinner + 结果摘要
     │   ├── status_bar.py        # 状态栏(4档自适应) + TokPerSecEstimator
     │   └── onboarding.py        # 首次启动引导
     ├── core/
+    │   ├── event_bus.py         # [v1.3] 统一事件总线(append-only日志+replay)
+    │   ├── cognitive_gate.py    # [v1.3] 认知门控(patch行数递减检测)
+    │   ├── wink.py              # [v1.3] Wink自修复监控(偏离检测+纠正注入)
     │   ├── gate.py              # LLM任务分类 → 专家知识叠加
-    │   ├── orchestrator.py      # 确定性流水线 + KWCODE.md注入 + Checkpoint + ValueTracker
+    │   ├── orchestrator.py      # 确定性流水线 + 错误策略路由 + Plan自动触发
     │   ├── context.py           # TaskContext数据类
+    │   ├── task_compiler.py     # DAG调度器 + WorktreeManager隔离
     │   ├── planner.py           # /plan计划模式 + 风险评估
     │   ├── checkpoint.py        # 文件快照(git stash/文件复制)
     │   ├── kwcode_md.py         # KWCODE.md分段加载+注入
     │   ├── model_capability.py  # 模型三档自适应(SMALL/MEDIUM/LARGE)
-    │   ├── context_pruner.py    # 上下文压缩(纯算法，<10ms)
+    │   ├── context_pruner.py    # 上下文压缩 + GraduatedCompactor 3层渐进压缩
     │   ├── network.py           # 网络探测+代理配置
     │   └── sysinfo.py           # 系统信息+VRAM监控
     ├── experts/
-    │   ├── locator.py           # BM25+调用图定位 + DocReader注入
+    │   ├── locator.py           # BM25+调用图定位 + DocReader注入 + Speculative Prefetch
     │   ├── generator.py         # 代码生成(original从文件读，LLM只写modified)
     │   ├── verifier.py          # 语法检查 + pytest
-    │   ├── search_augmentor.py  # 搜索增强 + BM25重排
+    │   ├── search_augmentor.py  # 搜索增强 + BM25重排 + 网络保护
+    │   ├── consistency_checker.py # 前后端接口一致性检查(确定性，不调LLM)
     │   ├── chat_expert.py       # 聊天(搜索门控：follow-up/推理不搜)
     │   └── office_handler.py    # Office文档生成
     ├── search/
-    │   ├── duckduckgo.py        # SearXNG+DDG并行搜索
+    │   ├── search_router.py     # [v1.3] 意图感知搜索路由(arxiv/S2/GitHub/PyPI/Open-Meteo)
+    │   ├── duckduckgo.py        # DDG主+SearXNG可选 + search_enabled开关
     │   ├── extraction_pipeline.py  # 四级内容提取
     │   ├── intent_classifier.py # 意图感知(5类+LLM fallback)
     │   ├── query_generator.py   # 按意图生成搜索词
@@ -228,6 +328,6 @@ kwcode/
     ├── ast_engine/              # tree-sitter AST + 调用图(SQLite)
     ├── mcp/                     # MCP Router
     ├── llm/                     # Ollama + llama.cpp双后端
-    ├── tools/                   # 5个确定性工具
-    └── tests/                   # 282个测试
+    ├── tools/                   # 5个确定性工具 + ToolGateway + import_fixer
+    └── tests/                   # 357个测试
 ```

@@ -10,6 +10,9 @@ import threading
 from typing import Optional
 
 from kaiwu.core.context import TaskContext
+from kaiwu.core.event_bus import EventBus
+from kaiwu.core.cognitive_gate import CognitiveGate
+from kaiwu.core.wink import WinkMonitor
 from kaiwu.experts.locator import LocatorExpert
 from kaiwu.experts.generator import GeneratorExpert
 from kaiwu.experts.verifier import VerifierExpert
@@ -40,6 +43,42 @@ EXPERT_SEQUENCES = {
     "vision":         ["vision"],
 }
 
+# ── 错误策略路由：按 error_type 切换重试序列 ──
+# 理论来源：Turn-Control Strategies（arXiv:2510.16786）；Wink（arXiv:2602.17037）
+RETRY_STRATEGIES = {
+    "syntax": {
+        "sequence": ["generator", "verifier"],
+        "hint": "只修复语法错误，错误在 {error_file}:{error_line}，不改其他逻辑",
+        "search": False,
+    },
+    "assertion": {
+        "sequence": ["generator", "verifier"],
+        "hint": "测试期望：{error_message}，只改让测试通过的最小代码",
+        "search": False,
+    },
+    "import": {
+        "sequence": ["import_fixer", "verifier"],
+        "hint": "",
+        "search": True,
+    },
+    "patch_apply": {
+        "sequence": ["locator", "generator", "verifier"],
+        "hint": "重新读取文件最新内容，不要使用缓存的 original",
+        "search": False,
+    },
+    "runtime": {
+        "sequence": ["debugger", "generator", "verifier"],
+        "hint": "",
+        "search": False,
+    },
+    "unknown": {
+        "sequence": ["generator", "verifier"],
+        "hint": "缩小修改范围，只改最小可疑函数",
+        "search": False,
+        "scope_narrow": True,
+    },
+}
+
 
 class PipelineOrchestrator:
     """Deterministic expert pipeline orchestrator."""
@@ -62,6 +101,7 @@ class PipelineOrchestrator:
         chat_expert: ChatExpert | None = None,
         debug_subagent=None,
         vision_expert=None,
+        bus: EventBus | None = None,
     ):
         self.locator = locator
         self.generator = generator
@@ -79,6 +119,9 @@ class PipelineOrchestrator:
         self.debug_subagent = debug_subagent
         self._value_tracker = ValueTracker()
         self._notifier = FlywheelNotifier()
+        self.bus = bus or EventBus()
+        self._wink = WinkMonitor()
+        self._cognitive_gate = CognitiveGate()
 
     def run(
         self,
@@ -240,11 +283,35 @@ class PipelineOrchestrator:
 
         # codegen任务如果涉及实时数据，首次就触发搜索（不等失败重试）
         if expert_type == "codegen" and not no_search and self._needs_realtime_data(user_input):
-            self._emit(on_status, "search", "检测到实时数据需求，预搜索...")
-            ctx.search_results = self.search_augmentor.search(ctx)
-            ctx.search_triggered = True
-            if ctx.search_results:
-                self._emit(on_status, "search_done", f"搜索完成，注入{len(ctx.search_results)}字参考信息")
+            try:
+                self._emit(on_status, "search", "检测到实时数据需求，预搜索...")
+                results = self.search_augmentor.search(ctx)
+                if results:
+                    ctx.search_results = results
+                    ctx.search_triggered = True
+                    self._emit(on_status, "search_done", f"搜索完成，注入{len(results)}字参考信息")
+            except Exception as e:
+                logger.debug("Pre-search failed (网络保护，不阻塞): %s", e)
+
+        # ── Plan 自动触发：hard 任务自动生成计划（不打断用户）──
+        if (gate_result.get("difficulty") == "hard"
+                and expert_type not in ("chat", "office", "vision")
+                and not ctx.subtask_results):
+            try:
+                from kaiwu.core.planner import Planner
+                from kaiwu.memory import pattern_md
+                planner = Planner(
+                    locator=self.locator,
+                    pattern_md_module=pattern_md,
+                    llm=self.generator.llm,
+                )
+                plan = planner.generate_plan_steps(user_input, gate_result, project_root)
+                if plan and len(plan) > 1:
+                    ctx.execution_plan = plan
+                    self._emit(on_status, "plan_generated", f"自动生成 {len(plan)} 步计划")
+                    self.bus.emit("plan_generated", {"steps": len(plan), "msg": f"生成 {len(plan)} 步计划"})
+            except Exception as e:
+                logger.debug("Auto-plan failed (non-blocking): %s", e)
 
         # ── Checkpoint: snapshot before execution (skip in multi-task to avoid race) ──
         checkpoint = Checkpoint(project_root)
@@ -264,10 +331,14 @@ class PipelineOrchestrator:
             self._emit(on_status, "low_confidence",
                        f"任务分类置信度较低({confidence:.0%})，减少重试次数")
 
+        # ── CognitiveGate reset for this task ──
+        self._cognitive_gate.reset()
+
         while ctx.retry_count < max_retries:
             # Watchdog check: abort if task exceeded timeout
             if _watchdog_triggered.is_set():
                 self._emit(on_status, "watchdog", f"任务超时({TASK_TIMEOUT_S}s)，强制终止")
+                self.bus.emit("circuit_break", {"msg": f"任务超时({TASK_TIMEOUT_S}s)"})
                 break
 
             success = self._run_sequence(sequence, ctx, on_status)
@@ -313,6 +384,15 @@ class PipelineOrchestrator:
             # Save failure info for retry strategy
             ctx.previous_failure = error_detail
 
+            # ── CognitiveGate: 检测边际收益递减 ──
+            if ctx.generator_output:
+                self._cognitive_gate.record(ctx.generator_output.get("patches", []))
+            cg_stop, cg_reason = self._cognitive_gate.should_stop()
+            if cg_stop:
+                self._emit(on_status, "circuit_break", cg_reason)
+                self.bus.emit("circuit_break", {"msg": cg_reason})
+                break
+
             # ── Circuit breaker: same error_type streak ──
             current_error_type = ""
             if ctx.verifier_output:
@@ -329,17 +409,33 @@ class PipelineOrchestrator:
             # Fast circuit break: syntax errors don't improve with retries
             if current_error_type == "syntax" and ctx.retry_count >= 1:
                 self._emit(on_status, "circuit_break", "语法错误重试无效，模型能力不足以完成此任务")
+                self.bus.emit("circuit_break", {"msg": "syntax error"})
                 break
-            # Fast circuit break: missing imports need user action
+            # Fast circuit break: missing imports — try import_fixer first
             if current_error_type == "import":
-                missing = ctx.verifier_output.get("error_message", "") if ctx.verifier_output else ""
-                self._emit(on_status, "circuit_break", f"缺少依赖：{missing}，请先安装")
-                break
+                fixed = self._try_import_fix(ctx, on_status)
+                if not fixed:
+                    missing = ctx.verifier_output.get("error_message", "") if ctx.verifier_output else ""
+                    self._emit(on_status, "circuit_break", f"缺少依赖：{missing}，请先安装")
+                    self.bus.emit("circuit_break", {"msg": f"import: {missing}"})
+                    break
+                # import_fixer succeeded, continue retry loop
             # Hard circuit break: same error type 3 times in a row
             if ctx._error_type_streak["count"] >= 3:
                 self._emit(on_status, "circuit_break",
                            f"同类错误({current_error_type})连续{ctx._error_type_streak['count']}次，停止重试")
+                self.bus.emit("circuit_break", {"msg": f"{current_error_type} x{ctx._error_type_streak['count']}"})
                 break
+
+            # ── Wink 自修复：检测偏离并注入纠正 ──
+            wink_hint = self._wink.check(ctx, self.bus)
+
+            # ── 错误策略路由：按 error_type 切换重试序列 ──
+            retry_strategy = RETRY_STRATEGIES.get(current_error_type, RETRY_STRATEGIES["unknown"])
+            sequence = retry_strategy["sequence"]
+            ctx.retry_hint = self._build_retry_hint(ctx, current_error_type)
+            if wink_hint:
+                ctx.retry_hint = (ctx.retry_hint + "\n" + wink_hint).strip() if ctx.retry_hint else wink_hint
 
             # ── Scope narrowing: on 2nd failure, reduce to first file+function ──
             if ctx.retry_count == 2 and ctx.locator_output:
@@ -357,8 +453,10 @@ class PipelineOrchestrator:
                             files[0]: ctx.relevant_code_snippets.get(files[0], "")
                         }
                     self._emit(on_status, "scope_narrow", f"缩小范围：只修 {funcs[0]}()")
+                    self.bus.emit("scope_narrow", {"msg": f"只修 {funcs[0]}()"})
 
             self._emit(on_status, "retry", f"第{ctx.retry_count}次尝试失败：{error_detail[:100]}")
+            self.bus.emit("retry", {"count": ctx.retry_count, "error": error_detail[:100]})
 
             # Reflection before 2nd retry: ask LLM why the patch failed
             if ctx.retry_count == 1 and ctx.verifier_output and ctx.generator_output:
@@ -371,16 +469,22 @@ class PipelineOrchestrator:
             # Set retry strategy: each retry uses a different approach
             ctx.retry_strategy = ctx.retry_count  # 0→1→2
 
-            # Trigger SearchAugmentor: failed 2x OR hard task failed 1x
-            should_search = (
-                ctx.retry_count >= 2
-                or (gate_result.get("difficulty") == "hard" and ctx.retry_count >= 1)
-            )
-            if should_search and not ctx.search_triggered and not no_search:
-                self._emit(on_status, "search", "触发搜索增强...")
-                ctx.search_results = self.search_augmentor.search(ctx)
-                ctx.search_triggered = True
-                self._emit(on_status, "search_done", f"搜索完成，注入{len(ctx.search_results)}字参考信息")
+            # ── 错误驱动搜索：按失败类型决定是否搜索（网络保护：异常不阻塞）──
+            if self._should_search(current_error_type, ctx.retry_count) and not ctx.search_triggered and not no_search:
+                try:
+                    self._emit(on_status, "search", f"搜索 {current_error_type} 解法...")
+                    self.bus.emit("search_start", {"msg": f"搜索 {current_error_type} 解法"})
+                    results = self.search_augmentor.search(ctx)
+                    if results:  # 搜到才用，搜不到继续原流程
+                        ctx.search_results = results
+                        ctx.search_triggered = True
+                        self._emit(on_status, "search_done", f"搜索完成，注入{len(results)}字参考信息")
+                        self.bus.emit("search_solution", {"msg": "找到参考方案"})
+                    else:
+                        ctx.search_triggered = True  # 标记已尝试，不重复触发
+                except Exception as e:
+                    logger.debug("Search failed (网络保护，不阻塞): %s", e)
+                    ctx.search_triggered = True  # 失败也标记，避免循环重试搜索
 
             # Reset expert outputs for retry (RED-3: fresh context each attempt)
             ctx.locator_output = None
@@ -647,3 +751,59 @@ class PipelineOrchestrator:
             )
         except Exception as e:
             logger.debug("Reflection persistence failed (non-blocking): %s", e)
+
+    def _build_retry_hint(self, ctx: TaskContext, error_type: str) -> str:
+        """按错误类型生成重试提示，注入 Generator prompt。"""
+        strategy = RETRY_STRATEGIES.get(error_type, RETRY_STRATEGIES["unknown"])
+        template = strategy.get("hint", "")
+        if not template:
+            return ""
+        v = ctx.verifier_output or {}
+        try:
+            return template.format(
+                error_file=v.get("error_file", ""),
+                error_line=v.get("error_line", 0),
+                error_message=v.get("error_message", ""),
+            )
+        except (KeyError, ValueError):
+            return template
+
+    def _should_search(self, error_type: str, retry_count: int) -> bool:
+        """按失败类型决定是否搜网络，不是统一在 retry>=2 时搜。"""
+        strategy = RETRY_STRATEGIES.get(error_type, RETRY_STRATEGIES["unknown"])
+        # import 错误：立刻搜
+        if strategy.get("search") and retry_count >= 1:
+            return True
+        # runtime 错误：debug 一次后仍失败才搜
+        if error_type == "runtime" and retry_count >= 2:
+            return True
+        # assertion 连续 2 次同样错误：搜最优解法
+        if error_type == "assertion" and retry_count >= 2:
+            return True
+        # 通用 fallback：第3次失败搜
+        if retry_count >= 3:
+            return True
+        return False
+
+    def _try_import_fix(self, ctx: TaskContext, on_status) -> bool:
+        """尝试用 import_fixer 确定性修复缺失 import（不调 LLM）。"""
+        try:
+            from kaiwu.tools.import_fixer import fix_missing_import
+            v = ctx.verifier_output or {}
+            error_msg = v.get("error_message", "")
+            error_file = v.get("error_file", "")
+            if not error_file or not error_msg:
+                return False
+            content = self.tools.read_file(error_file)
+            if content.startswith("[ERROR]"):
+                return False
+            fixed = fix_missing_import(content, error_msg)
+            if fixed and fixed != content:
+                self.tools.write_file(error_file, fixed)
+                self._emit(on_status, "import_fix", f"自动修复 import: {error_file}")
+                self.bus.emit("file_written", {"path": error_file})
+                return True
+            return False
+        except Exception as e:
+            logger.debug("Import fixer failed (non-blocking): %s", e)
+            return False

@@ -225,3 +225,119 @@ def _extract_code_blocks(text: str) -> str:
     for block in blocks[:3]:
         result_parts.append(f"```\n{block.rstrip()}\n```")
     return "\n\n".join(result_parts)
+
+
+# ── GraduatedCompactor: 3层渐进压缩 ──
+# 理论来源：CC 5层压缩管道（arXiv:2604.14228）；OPENDEV Adaptive Compaction（arXiv:2603.05344）
+
+class GraduatedCompactor:
+    """
+    3 层渐进压缩，按 token 使用率分级触发。
+    Layer 1 (70%)：裁剪 tool 输出冗余
+    Layer 2 (85%)：压缩中间轮次 assistant 输出
+    Layer 3 (95%)：摘要化早期对话，只保留关键决策
+    """
+
+    def __init__(self, max_tokens: int = 8192):
+        self._pruner = ContextPruner(max_tokens=max_tokens)
+        self.max_tokens = max_tokens
+
+    def compress(self, messages: list[dict], usage_ratio: float = 0.0,
+                 bus=None) -> list[dict]:
+        """
+        按 token 使用率分级压缩。
+        Args:
+            messages: 消息列表
+            usage_ratio: 当前 token 使用率 (0.0~1.0)，0 表示自动计算
+            bus: EventBus 实例（可选，用于发射压缩事件）
+        """
+        if not messages:
+            return messages
+
+        # 自动计算使用率
+        if usage_ratio <= 0:
+            total = sum(_count_tokens(m.get("content", "")) for m in messages)
+            usage_ratio = total / max(self.max_tokens, 1)
+
+        if usage_ratio < 0.70:
+            return messages
+
+        layer = self._layer(usage_ratio)
+        if bus:
+            bus.emit("pre_compact", {"ratio": usage_ratio, "layer": layer})
+
+        if usage_ratio < 0.85:
+            result = self._layer1_trim_tools(messages)
+        elif usage_ratio < 0.95:
+            result = self._layer2_compress_middle(messages)
+        else:
+            result = self._layer3_summarize_early(messages)
+
+        if bus:
+            orig = sum(_count_tokens(m.get("content", "")) for m in messages)
+            new = sum(_count_tokens(m.get("content", "")) for m in result)
+            bus.emit("post_compact", {"saved_tokens": orig - new, "layer": layer})
+
+        return result
+
+    def _layer(self, ratio: float) -> int:
+        return 1 if ratio < 0.85 else (2 if ratio < 0.95 else 3)
+
+    def _layer1_trim_tools(self, messages: list[dict]) -> list[dict]:
+        """Layer 1: 裁剪 tool 输出冗余（>500 token 的 tool 输出提取关键词）。"""
+        result = []
+        for msg in messages:
+            if msg.get("role") == "tool" and _count_tokens(msg.get("content", "")) > 500:
+                content = msg.get("content", "")
+                # 保护代码块
+                if _has_code_block(content):
+                    code_only = _extract_code_blocks(content)
+                    if code_only:
+                        result.append({**msg, "content": code_only})
+                        continue
+                kw = _extract_keywords(content)
+                if kw:
+                    result.append({**msg, "content": kw})
+                else:
+                    tokens = _count_tokens(content)
+                    result.append({**msg, "content": f"[tool output masked, {tokens} tokens]"})
+            else:
+                result.append(msg)
+        return result
+
+    def _layer2_compress_middle(self, messages: list[dict]) -> list[dict]:
+        """Layer 2: 复用 ContextPruner 逻辑压缩中间轮次。"""
+        return self._pruner.prune(messages)
+
+    def _layer3_summarize_early(self, messages: list[dict]) -> list[dict]:
+        """Layer 3: 摘要化早期对话，只保留关键决策。"""
+        if len(messages) < 6:
+            return self._layer2_compress_middle(messages)
+
+        # 保留头部（system + 首轮）
+        head = []
+        rest = list(messages)
+        if rest and rest[0].get("role") == "system":
+            head.append(rest.pop(0))
+        if rest and rest[0].get("role") == "user":
+            head.append(rest.pop(0))
+            if rest and rest[0].get("role") == "assistant":
+                head.append(rest.pop(0))
+
+        # 保留最近4条消息
+        if len(rest) <= 4:
+            return head + rest
+        recent = rest[-4:]
+        middle = rest[:-4]
+
+        # 中间部分提取关键词摘要
+        middle_keywords = []
+        for m in middle:
+            if m.get("role") in ("assistant", "tool"):
+                kw = _extract_keywords(m.get("content", ""))
+                if kw:
+                    middle_keywords.append(kw.replace("[摘要] ", ""))
+        summary_text = " | ".join(middle_keywords[:20]) if middle_keywords else "[早期对话已压缩]"
+        summary = {"role": "system", "content": f"[早期对话摘要] {summary_text}"}
+
+        return head + [summary] + recent

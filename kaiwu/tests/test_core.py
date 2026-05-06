@@ -317,14 +317,14 @@ class TestOrchestrator:
 
     def test_search_triggered_on_hard_task(self):
         gen = {"patches": [{"file": "test.py", "original": "old", "modified": "new"}], "explanation": "fixed"}
-        # First call fails, second succeeds
+        # First two calls fail, third succeeds
         call_count = {"n": 0}
-        original_ver = {"passed": False, "syntax_ok": True, "tests_passed": 0, "tests_total": 1, "error_detail": "test failed"}
+        original_ver = {"passed": False, "syntax_ok": True, "tests_passed": 0, "tests_total": 1, "error_detail": "test failed", "error_type": "assertion"}
 
         class DynamicVerifier:
             def run(self, ctx):
                 call_count["n"] += 1
-                if call_count["n"] >= 2:
+                if call_count["n"] >= 3:
                     result = {"passed": True, "syntax_ok": True, "tests_passed": 1, "tests_total": 1, "error_detail": ""}
                 else:
                     result = original_ver.copy()

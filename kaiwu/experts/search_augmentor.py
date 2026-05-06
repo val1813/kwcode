@@ -44,9 +44,13 @@ class SearchAugmentorExpert:
         self.fetcher = ContentFetcher()
 
     def search(self, ctx: TaskContext) -> str:
-        """完整搜索流水线（供重试路径使用）。任何异常返回空字符串。"""
+        """完整搜索流水线（供重试路径使用）。任何异常返回空字符串，不阻塞流水线。"""
         t0 = time.time()
         try:
+            # 搜索开关检查
+            from kaiwu.search.duckduckgo import _is_search_enabled
+            if not _is_search_enabled():
+                return ""
             query = ctx.user_input[:120]
             raw = self._search_and_collect(query, t0)
             if not raw:
@@ -54,7 +58,7 @@ class SearchAugmentorExpert:
             # LLM提取关键信息
             return self._extract(query, raw)
         except Exception as e:
-            logger.error("[search] pipeline error: %s", e)
+            logger.debug("[search] pipeline error (静默): %s", e)
             return ""
 
     def search_only(self, query: str) -> str:

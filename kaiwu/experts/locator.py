@@ -34,6 +34,10 @@ logger = logging.getLogger(__name__)
 
 LOCATOR_FILE_PROMPT = """你是代码定位专家。根据任务描述，从文件列表中找出最相关的文件。
 
+重要：首先查看.kaiwu/rig.json（如果存在），它包含项目的文件导出/导入关系、API路由映射和测试覆盖信息。优先利用rig.json中的依赖关系来定位相关文件。
+
+{rig_context}
+
 仓库文件结构：
 {file_tree}
 
@@ -187,6 +191,9 @@ class LocatorExpert:
         # ── DocReader: inject relevant document paragraphs ──
         self._inject_doc_context(ctx)
 
+        # ── Speculative Prefetch: 后台预读文件到缓存 ──
+        self._prefetch(relevant_files[:5])
+
         return result
 
     def _llm_locate(self, ctx: TaskContext, task_desc: str) -> Optional[dict]:
@@ -253,6 +260,19 @@ class LocatorExpert:
 
         return result
 
+    def _prefetch(self, files: list[str]):
+        """Speculative Prefetch: Locator完成后后台预读文件到内存，减少Generator等待IO。"""
+        import threading
+
+        def _do():
+            for f in files[:5]:
+                try:
+                    self.tools.read_file(f)
+                except Exception:
+                    pass
+
+        threading.Thread(target=_do, daemon=True, name="prefetch").start()
+
     def notify_task_result(self, ctx: TaskContext, success: bool):
         """
         Post-task callback:
@@ -301,16 +321,54 @@ class LocatorExpert:
         except Exception as e:
             logger.debug("[locator] doc_reader skipped: %s", e)
 
+    def _load_rig_context(self, project_root: str) -> str:
+        """Load rig_summary.json for prompt injection. Returns empty string if unavailable."""
+        rig_path = os.path.join(project_root, ".kaiwu", "rig_summary.json")
+        if not os.path.exists(rig_path):
+            return ""
+        try:
+            import json
+            with open(rig_path, "r", encoding="utf-8") as f:
+                rig = json.load(f)
+            # Build compact summary: routes + key file exports
+            parts = []
+            routes = rig.get("api_routes", {})
+            if routes:
+                parts.append("API路由:")
+                for route, loc in list(routes.items())[:20]:
+                    parts.append(f"  {route} → {loc}")
+            frontend = rig.get("frontend_api_calls", {})
+            if frontend:
+                parts.append("前端调用:")
+                for route, loc in list(frontend.items())[:20]:
+                    parts.append(f"  {route} → {loc}")
+            test_cov = rig.get("test_coverage", {})
+            if test_cov:
+                parts.append("测试覆盖:")
+                for src, tests in list(test_cov.items())[:10]:
+                    parts.append(f"  {src} ← {', '.join(tests)}")
+            return "\n".join(parts) if parts else ""
+        except Exception:
+            return ""
+
     def _locate_files(self, file_tree: str, task_desc: str, symbol_index: str = "", ctx: TaskContext = None) -> list[str]:
         """Phase 1: LLM call to find relevant files from tree + symbol index."""
         si_section = ""
         if symbol_index:
             si_section = f"各文件的函数/类定义：\n{symbol_index}"
 
+        # Load rig.json context for better file location
+        rig_context = ""
+        if ctx:
+            rig_context = self._load_rig_context(ctx.project_root)
+        if rig_context:
+            rig_context = f"项目结构索引(rig.json):\n{rig_context}"
+
         prompt = LOCATOR_FILE_PROMPT.format(
             file_tree=file_tree[:3000],
             symbol_index=si_section[:2000],
             task_description=task_desc,
+            rig_context=rig_context[:2000],
         )
         system = self._build_system(ctx) if ctx else ""
         raw = self.llm.generate(prompt=prompt, system=system, max_tokens=300, temperature=0.0)

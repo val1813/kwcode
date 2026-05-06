@@ -1,10 +1,15 @@
 """
-搜索引擎：SearXNG统一接入（本地Docker），DDG库作为fallback。
-SearXNG覆盖所有搜索场景，不再需要DDG/Bing/wttr.in等特殊处理。
-kwcode启动首次搜索时自动拉起SearXNG容器。
+搜索引擎：DDG库为主，SearXNG为可选增强。
+内网/离线环境静默降级，不报错不阻塞流水线。
+
+网络保护原则：
+- SearXNG 降为可选，不自动拉起 Docker
+- DDG 库也不可用时返回空列表
+- 任何网络异常静默处理，不抛出
 """
 
 import logging
+import os
 import subprocess
 import time
 from typing import Optional
@@ -17,12 +22,38 @@ logger = logging.getLogger(__name__)
 DEFAULT_SEARXNG_URL = "http://localhost:8080"
 CONTAINER_NAME = "kwcode-searxng"
 
-# DDG库作为fallback
+# DDG库作为主搜索
 try:
     from duckduckgo_search import DDGS
     HAS_DDGS = True
 except ImportError:
     HAS_DDGS = False
+
+
+def _is_search_enabled() -> bool:
+    """检查搜索是否启用（config.yaml 中 search_enabled 字段）。"""
+    from pathlib import Path
+    # 环境变量优先
+    env_val = os.environ.get("KWCODE_SEARCH_ENABLED", "").lower()
+    if env_val in ("0", "false", "no", "off"):
+        return False
+    if env_val in ("1", "true", "yes", "on"):
+        return True
+    # 读 config
+    for dirname in (".kwcode", ".kaiwu"):
+        config_path = os.path.join(Path.home(), dirname, "config.yaml")
+        if os.path.exists(config_path):
+            try:
+                import yaml
+                with open(config_path, "r", encoding="utf-8") as f:
+                    cfg = yaml.safe_load(f) or {}
+                val = cfg.get("search_enabled")
+                if val is not None:
+                    return bool(val)
+            except Exception:
+                pass
+    # 默认启用
+    return True
 
 
 def _get_searxng_url() -> str:
@@ -199,36 +230,43 @@ _searxng_ok: Optional[bool] = None
 
 def search(query: str, max_results: int = 10, timeout: float = 10.0) -> list[dict]:
     """
-    搜索入口：SearXNG + DDG 并行执行，结果去重合并。
+    搜索入口：DDG为主，SearXNG为可选增强。
+    内网/离线环境静默返回空列表，不报错不阻塞。
     返回 [{url, title, snippet}, ...]
     """
     global _searxng_ok
 
+    # ── 搜索开关：离线用户可完全禁用 ──
+    if not _is_search_enabled():
+        logger.debug("[search] 搜索已禁用(search_enabled=false)")
+        return []
+
     searxng_url = _get_searxng_url()
 
-    # 首次检测SearXNG可用性（缓存整个session）
+    # 首次检测SearXNG可用性（缓存整个session，不自动拉起Docker）
     if _searxng_ok is None:
         _searxng_ok = _searxng_available(searxng_url)
-        if not _searxng_ok:
-            logger.info("[search] SearXNG不可用，尝试自动启动...")
-            if _try_start_searxng():
-                _searxng_ok = True
-            else:
-                logger.info("[search] SearXNG自动启动失败，使用DDG fallback")
         if _searxng_ok:
             logger.info("[search] SearXNG可用: %s", searxng_url)
+        else:
+            logger.debug("[search] SearXNG不可用，使用DDG")
 
     # 并行搜索：SearXNG + DDG 同时跑，结果去重合并
-    if _searxng_ok and HAS_DDGS:
-        return _search_parallel(query, max_results, timeout, searxng_url)
+    try:
+        if _searxng_ok and HAS_DDGS:
+            return _search_parallel(query, max_results, timeout, searxng_url)
 
-    # 单引擎 fallback
-    if _searxng_ok:
-        results = _search_searxng(query, max_results, timeout, searxng_url)
-        if results:
-            return results
+        # 单引擎 fallback
+        if _searxng_ok:
+            results = _search_searxng(query, max_results, timeout, searxng_url)
+            if results:
+                return results
 
-    return _search_ddg(query, max_results, timeout)
+        return _search_ddg(query, max_results, timeout)
+    except Exception as e:
+        # 任何网络异常静默处理，返回空列表
+        logger.debug("[search] 搜索异常(静默): %s", e)
+        return []
 
 
 def _search_parallel(query: str, max_results: int, timeout: float, searxng_url: str) -> list[dict]:

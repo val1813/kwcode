@@ -52,6 +52,46 @@ console = Console()
 
 # ── Status display ────────────────────────────────────────────
 
+# EventBus event icons (追加式渲染，替代单行spinner)
+EVENT_ICONS = {
+    "expert_start":    ("●", "blue"),
+    "reading_file":    ("  📄", "dim"),
+    "file_written":    ("  ✓", "green"),
+    "applying_patch":  ("  →", "yellow"),
+    "patch_result":    ("  ✓", "green"),
+    "generator_patch": ("  →", "yellow"),
+    "test_pass":       ("  ✓", "green"),
+    "test_fail":       ("  ✗", "red"),
+    "retry":           ("🔄", "yellow"),
+    "circuit_break":   ("⛔", "red"),
+    "scope_narrow":    ("🎯", "cyan"),
+    "search_start":    ("🌐", "blue"),
+    "search_solution": ("💡", "cyan"),
+    "plan_generated":  ("📋", "blue"),
+    "pre_compact":     ("📦", "dim"),
+    "wink_intervene":  ("🔧", "yellow"),
+}
+
+# 阶段级事件（换行显示）
+_PHASE_EVENTS = {"expert_start", "retry", "circuit_break", "plan_generated", "wink_intervene"}
+
+
+def _eventbus_cli_handler(event: str, payload: dict):
+    """EventBus 全局 CLI handler：追加式渲染事件到终端。"""
+    icon_info = EVENT_ICONS.get(event)
+    if not icon_info:
+        return
+    icon, color = icon_info
+    detail = payload.get("path") or payload.get("msg") or payload.get("cmd", "")
+    if not detail:
+        return
+    if event in _PHASE_EVENTS:
+        console.print()
+        console.print(f"[bold {color}]{icon} {detail}[/bold {color}]")
+    else:
+        console.print(f"[{color}]{icon} {detail}[/{color}]")
+
+
 # Spinner stage mapping (internal stage → user-friendly description)
 _SPINNER_STAGES = {
     "gate": "分析任务...",
@@ -113,24 +153,24 @@ def _build_pipeline(model_path, ollama_url, ollama_model, project_root, verbose)
     net = detect_network()
     if net["china"]:
         proxy_hint = f"代理: {net['proxy']}" if net["proxy"] else "配置代理可加速: export KAIWU_PROXY=http://..."
-        console.print(f"  [yellow][网络] 国内网络，搜索已启用 Bing fallback。{proxy_hint}[/yellow]")
+        console.print(f"  [yellow][网络] 国内网络。{proxy_hint}[/yellow]")
 
-    # SearXNG预检测+自动启动（在pipeline构建时完成，不阻塞用户首次提问）
-    from kaiwu.search.duckduckgo import _searxng_available, _try_start_searxng, _get_searxng_url
+    # SearXNG预检测（不自动拉起Docker，静默降级）
+    from kaiwu.search.duckduckgo import _searxng_available, _get_searxng_url, _is_search_enabled
     import kaiwu.search.duckduckgo as _search_mod
-    if _search_mod._searxng_ok is None:
+    if not _is_search_enabled():
+        console.print(f"  [dim][搜索] 已禁用(search_enabled=false)[/dim]")
+    elif _search_mod._searxng_ok is None:
         searxng_url = _get_searxng_url()
         if _searxng_available(searxng_url):
             _search_mod._searxng_ok = True
             console.print(f"  [green][搜索] SearXNG 就绪[/green]")
         else:
-            console.print(f"  [yellow][搜索] SearXNG 未就绪，尝试自动启动...[/yellow]")
-            if _try_start_searxng():
-                _search_mod._searxng_ok = True
-                console.print(f"  [green][搜索] SearXNG 已自动启动[/green]")
+            _search_mod._searxng_ok = False
+            if _search_mod.HAS_DDGS:
+                console.print(f"  [dim][搜索] SearXNG 不可用，使用 DuckDuckGo[/dim]")
             else:
-                _search_mod._searxng_ok = False
-                console.print(f"  [yellow][搜索] SearXNG 不可用，降级到 DuckDuckGo[/yellow]")
+                console.print(f"  [dim][搜索] 无可用搜索引擎，搜索增强已禁用[/dim]")
 
     # Load API key from config
     from kaiwu.cli.onboarding import load_config as _load_cfg
@@ -190,6 +230,10 @@ def _build_pipeline(model_path, ollama_url, ollama_model, project_root, verbose)
         debug_subagent=debug_subagent,
         vision_expert=vision_expert,
     )
+
+    # Wire EventBus CLI handler
+    orchestrator.bus.on("*", _eventbus_cli_handler)
+
     # Wire circular reference: ABTester needs orchestrator for backtest
     ab_tester.orchestrator = orchestrator
 

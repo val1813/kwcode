@@ -13,6 +13,7 @@ import threading
 from typing import Optional
 
 from kaiwu.core.context import TaskContext
+from kaiwu.core.event_bus import EventBus
 from kaiwu.llm.llama_backend import LLMBackend
 from kaiwu.tools.executor import ToolExecutor
 from kaiwu.tools.ast_utils import extract_symbols, format_symbol_list
@@ -181,6 +182,12 @@ class LocatorExpert:
             content = self.tools.read_file(fpath)
             if content.startswith("[ERROR]"):
                 continue
+            try:
+                bus = EventBus.get_instance()
+                if bus:
+                    bus.emit("reading_file", {"path": fpath})
+            except Exception:
+                pass
             snippet = self._extract_snippet(content, relevant_functions, file_path=fpath)
             if snippet:
                 code_snippets[fpath] = snippet

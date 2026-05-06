@@ -26,10 +26,20 @@ class EventBus:
     - replay() 返回完整事件日志
     """
 
+    _instance: "EventBus | None" = None
+
     def __init__(self):
         self._handlers: dict[str, list[Callable]] = defaultdict(list)
         self._wildcard: list[Callable] = []
         self._log: list[dict] = []
+        # 首个实例自动成为单例（Orchestrator 创建的那个）
+        if EventBus._instance is None:
+            EventBus._instance = self
+
+    @classmethod
+    def get_instance(cls) -> "EventBus | None":
+        """返回全局单例（如果已创建）。专家层用此获取 bus。"""
+        return cls._instance
 
     def on(self, event: str, handler: Callable):
         """注册事件处理器。event="*" 监听所有事件。"""

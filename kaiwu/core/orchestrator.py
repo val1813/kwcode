@@ -40,7 +40,7 @@ from kaiwu.notification.flywheel_notifier import FlywheelNotifier
 
 logger = logging.getLogger(__name__)
 
-# RED-2: Fixed sequences per expert_type. No LLM decides next step.
+# RED-2: Fixed sequences per expert_type.
 EXPERT_SEQUENCES = {
     "locator_repair": ["locator", "generator", "verifier"],
     "codegen":        ["generator", "verifier"],
@@ -51,7 +51,7 @@ EXPERT_SEQUENCES = {
     "vision":         ["vision"],
 }
 
-# ── 错误策略路由：按 error_type 切换重试序列 ──
+# 错误策略路由：按 error_type 切换重试序列
 # 理论来源：Turn-Control Strategies（arXiv:2510.16786）；Wink（arXiv:2602.17037）
 RETRY_STRATEGIES = {
     "syntax": {
@@ -91,8 +91,8 @@ RETRY_STRATEGIES = {
 class PipelineOrchestrator:
     """Deterministic expert pipeline orchestrator."""
 
-    MAX_RETRIES = 3  # Default, overridden by _get_max_retries()
-    _RETRY_BY_DIFFICULTY = {"easy": 2, "hard": 4}  # Dynamic budget
+    MAX_RETRIES = 3  # 默认值，被 _get_max_retries() 覆盖
+    _RETRY_BY_DIFFICULTY = {"easy": 2, "hard": 4}  # 动态重试预算
 
     def __init__(
         self,
@@ -151,8 +151,8 @@ class PipelineOrchestrator:
         """
         start_time = time.time()
 
-        # ── Watchdog: task-level timeout (P2) ──
-        TASK_TIMEOUT_S = 300  # 5 minutes max per task
+        # 任务级超时看门狗
+        TASK_TIMEOUT_S = 300  # 单任务最长5分钟
         _watchdog_triggered = threading.Event()
 
         def _watchdog_timer():
@@ -162,7 +162,7 @@ class PipelineOrchestrator:
         _watchdog.daemon = True
         _watchdog.start()
 
-        # Store project_root for Gate 2 backtest use
+        # 保存 project_root 供 Gate 2 回测使用
         self._backtest_project_root = project_root
 
         ctx = TaskContext(
@@ -173,7 +173,7 @@ class PipelineOrchestrator:
             expert_system_prompt=gate_result.get("system_prompt", ""),
         )
 
-        # Reset manifest for each new top-level task
+        # 每次顶层任务重置manifest
         self._manifest.clear()
 
         # 处理图片路径
@@ -183,19 +183,19 @@ class PipelineOrchestrator:
 
         expert_type = gate_result.get("expert_type", "locator_repair")
 
-        # ── Pre-search results injection (P1-B) ──
+        # 预搜索结果注入
         if pre_search_results:
             ctx.search_results = pre_search_results
             ctx.search_triggered = True
             self._emit(on_status, "search", "已预加载实时数据")
 
-        # ── KWCODE.md rules injection ──
+        # KWCODE.md 规则注入
         kwcode_sections = load_kwcode_md(project_root)
         if kwcode_sections:
             kwcode_rules = build_kwcode_system(expert_type, kwcode_sections)
             if kwcode_rules:
                 ctx.kwcode_rules = kwcode_rules
-                # Prepend to expert_system_prompt so it flows to all experts
+                # 追加到 expert_system_prompt，使规则流向所有专家
                 if ctx.expert_system_prompt:
                     ctx.expert_system_prompt = f"{kwcode_rules}\n\n{ctx.expert_system_prompt}"
                 else:
@@ -206,10 +206,10 @@ class PipelineOrchestrator:
         if simple_result is not None:
             return simple_result
 
-        # Gate 3: AB test
+        # Gate 3: AB测试
         ab_candidate_name, ab_used_new, gate_result = self._setup_ab_test(gate_result, expert_type, on_status)
 
-        # Use custom pipeline from expert registry if available, else default
+        # 优先使用专家注册表的自定义pipeline，否则用默认
         if gate_result.get("route_type") == "expert_registry" and "pipeline" in gate_result:
             sequence = gate_result["pipeline"]
         else:
@@ -217,10 +217,10 @@ class PipelineOrchestrator:
 
         self._emit(on_status, "gate", f"任务类型：{expert_type} | 难度：{gate_result.get('difficulty', '?')}")
 
-        # Experience replay + pre-search + plan
+        # 经验回放 + 预搜索 + 计划生成
         self._prepare_context(ctx, gate_result, expert_type, user_input, project_root, no_search, on_status)
 
-        # ── Checkpoint: snapshot before execution (skip in multi-task to avoid race) ──
+        # 检查点：执行前快照（多任务时跳过，避免竞态）
         checkpoint = Checkpoint(project_root)
         checkpoint_saved = False
         if not skip_checkpoint:
@@ -228,21 +228,21 @@ class PipelineOrchestrator:
             if not checkpoint_saved:
                 self._emit(on_status, "warning", "无法创建文件快照，任务失败时需手动还原")
 
-        # Dynamic retry budget based on task difficulty
+        # 按任务难度动态调整重试预算
         max_retries = self._get_max_retries(gate_result)
 
-        # Low confidence: reduce retry budget (not worth many attempts)
+        # 低置信度：减少重试预算（不值得多次尝试）
         confidence = gate_result.get("confidence", 1.0)
         if confidence < 0.6 and expert_type not in ("chat", "office", "vision"):
             max_retries = min(max_retries, 2)
             self._emit(on_status, "low_confidence",
                        f"任务分类置信度较低({confidence:.0%})，减少重试次数")
 
-        # ── CognitiveGate reset for this task ──
+        # CognitiveGate 重置
         self._cognitive_gate.reset()
 
         while ctx.retry_count < max_retries:
-            # Watchdog check: abort if task exceeded timeout
+            # 看门狗检查：超时则中止
             if _watchdog_triggered.is_set():
                 self._emit(on_status, "watchdog", f"任务超时({TASK_TIMEOUT_S}s)，强制终止")
                 self.bus.emit("circuit_break", {"msg": f"任务超时({TASK_TIMEOUT_S}s)"})
@@ -250,7 +250,7 @@ class PipelineOrchestrator:
 
             success = self._run_sequence(sequence, ctx, on_status)
 
-            # Notify locator of task result (graph stats + incremental update)
+            # 通知 locator 任务结果（图统计 + 增量更新）
             self._notify_locator(ctx, success)
 
             if success:

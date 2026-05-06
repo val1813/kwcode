@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kwcode"
-version = "1.0.9"
+version = "1.3.0"
 description = "KwCode - Local-model coding agent with MoE expert pipeline"
 requires-python = ">=3.10"
 readme = "README.md"

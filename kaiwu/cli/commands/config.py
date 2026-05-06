@@ -124,8 +124,54 @@ def cmd_stats(
             f"  ·  成功率 {summary['top_expert_rate']*100:.0f}%"
         )
 
+    # ── 飞轮统计 ──
     console.print()
-    console.print("  [dim]数据仅存本地，不上报任何服务器[/dim]")
+    console.print("  " + "─" * 45)
+
+    try:
+        from kaiwu.flywheel.strategy_stats import StrategyStats
+        ss = StrategyStats().get_summary()
+        if ss:
+            console.print()
+            console.print("  [bold cyan]错误策略飞轮[/bold cyan]")
+            for et, info in ss.items():
+                console.print(
+                    f"    {et}: 最优 {info['best_sequence']} "
+                    f"({info['best_success_rate']}，{info['total_attempts']}次)"
+                )
+        else:
+            console.print("  [dim]错误策略飞轮：数据积累中...[/dim]")
+    except Exception:
+        pass
+
+    try:
+        from kaiwu.flywheel.user_pattern_memory import UserPatternMemory
+        p = UserPatternMemory().get_summary()
+        console.print()
+        console.print("  [bold cyan]用户错误模式[/bold cyan]")
+        console.print(f"    累计任务：{p['total_tasks']} 次")
+        console.print(f"    总体成功率：{p['success_rate']}")
+        if p['top_errors']:
+            console.print(f"    高频错误：{', '.join(p['top_errors'])}")
+    except Exception:
+        pass
+
+    from pathlib import Path
+    draft_path = Path(".kaiwu/skill_draft.md")
+    if draft_path.exists():
+        console.print()
+        console.print("  [bold yellow]有待审核的 SKILL.md 草稿[/bold yellow]")
+        console.print("    运行 [bold]kwcode skill review[/bold] 查看")
+
+    console.print()
+    try:
+        from kaiwu.cli.onboarding import load_config
+        if load_config().get("telemetry_enabled"):
+            console.print("  [dim]匿名统计：已开启（仅上传成功率元数据）[/dim]")
+        else:
+            console.print("  [dim]数据仅存本地，不上报任何服务器[/dim]")
+    except Exception:
+        console.print("  [dim]数据仅存本地，不上报任何服务器[/dim]")
     console.print()
 
 
@@ -454,6 +500,91 @@ def handle_api_command(parts: list[str], current_url: str, current_model: str):
 
     # Signal caller to rebuild pipeline with new URL
     return {"url": new_url}
+
+
+# ── Telemetry commands ──────────────────────────────────────
+
+telemetry_app = typer.Typer(name="telemetry", help="匿名遥测管理")
+
+
+@telemetry_app.command("status")
+def telemetry_status():
+    """查看匿名遥测状态。"""
+    from kaiwu.cli.onboarding import load_config
+    config = load_config()
+    enabled = config.get("telemetry_enabled", False)
+    if enabled:
+        console.print("  [green]匿名统计：已开启[/green]")
+        console.print("  [dim]上传内容：error_type, retry_count, success, model[/dim]")
+        console.print("  [dim]不上传：代码内容、文件路径、任务描述、用户信息[/dim]")
+    else:
+        console.print("  [dim]匿名统计：已关闭[/dim]")
+    console.print("  [dim]运行 kwcode telemetry enable/disable 切换[/dim]")
+
+
+@telemetry_app.command("enable")
+def telemetry_enable():
+    """开启匿名遥测。"""
+    from kaiwu.cli.onboarding import load_config, _save_config
+    config = load_config()
+    config["telemetry_enabled"] = True
+    _save_config(config)
+    console.print("  [green]✓ 匿名统计已开启[/green]")
+
+
+@telemetry_app.command("disable")
+def telemetry_disable():
+    """关闭匿名遥测。"""
+    from kaiwu.cli.onboarding import load_config, _save_config
+    config = load_config()
+    config["telemetry_enabled"] = False
+    _save_config(config)
+    console.print("  [dim]匿名统计已关闭[/dim]")
+
+
+# ── Skill commands ─────────────────────────────────────────
+
+skill_app = typer.Typer(name="skill", help="SKILL.md 管理")
+
+
+@skill_app.command("review")
+def skill_review():
+    """查看自动生成的 SKILL.md 草稿。"""
+    from pathlib import Path
+    draft_path = Path(".kaiwu/skill_draft.md")
+    if not draft_path.exists():
+        console.print("  [dim]暂无待审核的 SKILL.md 草稿[/dim]")
+        console.print("  继续使用 kwcode，积累更多数据后会自动生成。")
+        return
+    console.print(draft_path.read_text(encoding="utf-8"))
+
+
+@skill_app.command("accept")
+def skill_accept():
+    """将草稿合并到正式 SKILL.md。"""
+    from pathlib import Path
+    draft_path = Path(".kaiwu/skill_draft.md")
+    if not draft_path.exists():
+        console.print("  [dim]暂无待审核的草稿[/dim]")
+        return
+    skill_path = Path("SKILL.md")
+    draft_content = draft_path.read_text(encoding="utf-8")
+    with open(skill_path, "a", encoding="utf-8") as f:
+        f.write("\n\n" + draft_content)
+    draft_path.unlink()
+    console.print("  [green]✓ 草稿已合并到 SKILL.md[/green]")
+
+
+@skill_app.command("discard")
+def skill_discard():
+    """丢弃草稿。"""
+    from pathlib import Path
+    draft_path = Path(".kaiwu/skill_draft.md")
+    if draft_path.exists():
+        draft_path.unlink()
+        console.print("  [dim]草稿已丢弃[/dim]")
+    else:
+        console.print("  [dim]暂无待丢弃的草稿[/dim]")
 
 
 def maybe_show_weekly_stats(console):

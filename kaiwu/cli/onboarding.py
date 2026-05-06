@@ -41,6 +41,7 @@ def run_onboarding() -> dict:
     _print_welcome()
     net = _detect_network_with_progress()
     config = _configure_api(net)
+    config = _ask_telemetry(config)
     _save_config(config)
     _print_ready(config, net)
     return config
@@ -203,6 +204,28 @@ def _verify_api(base_url: str, api_key: str, model: str) -> tuple[bool, str]:
                 continue
 
     return False, "API验证失败，请检查地址和Key"
+
+
+def _ask_telemetry(config: dict) -> dict:
+    """询问用户是否开启匿名遥测。"""
+    console.print("  [bold]匿名统计[/bold]\n")
+    console.print("  [dim]是否帮助改善kwcode？[/dim]")
+    console.print("  [dim]开启后将匿名上传任务成功率统计（不包含任何代码内容）[/dim]")
+    console.print("  [dim]可随时在设置中关闭。[/dim]")
+    console.print()
+
+    enabled = Confirm.ask(
+        "  开启匿名统计",
+        default=False,
+    )
+    config["telemetry_enabled"] = enabled
+
+    if enabled:
+        console.print("  [green]✓ 已开启匿名统计[/green]")
+    else:
+        console.print("  [dim]已关闭，可随时用 kwcode telemetry enable 开启[/dim]")
+    console.print()
+    return config
 
 
 def _save_config(config: dict):

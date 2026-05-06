@@ -37,6 +37,9 @@ from kaiwu.core.kwcode_md import load_kwcode_md, build_kwcode_system
 from kaiwu.core.upstream_manifest import UpstreamManifest
 from kaiwu.stats.value_tracker import ValueTracker
 from kaiwu.notification.flywheel_notifier import FlywheelNotifier
+from kaiwu.flywheel.strategy_stats import StrategyStats
+from kaiwu.flywheel.user_pattern_memory import UserPatternMemory
+from kaiwu.telemetry.client import TelemetryClient
 
 logger = logging.getLogger(__name__)
 
@@ -56,12 +59,12 @@ EXPERT_SEQUENCES = {
 RETRY_STRATEGIES = {
     "syntax": {
         "sequence": ["generator", "verifier"],
-        "hint": "只修复语法错误，错误在 {error_file}:{error_line}，不改其他逻辑",
+        "hint": "只修 {error_file}:{error_line} 的语法错误，修改≤5行，不触碰其他函数",
         "search": False,
     },
     "assertion": {
         "sequence": ["generator", "verifier"],
-        "hint": "测试期望：{error_message}，只改让测试通过的最小代码",
+        "hint": "测试期望：{error_message}。只改1个函数使断言通过，修改≤10行",
         "search": False,
     },
     "import": {
@@ -71,7 +74,7 @@ RETRY_STRATEGIES = {
     },
     "patch_apply": {
         "sequence": ["locator", "generator", "verifier"],
-        "hint": "重新读取文件最新内容，不要使用缓存的 original",
+        "hint": "必须先read_file读取文件最新内容，禁止使用缓存的original",
         "search": False,
     },
     "runtime": {
@@ -81,7 +84,7 @@ RETRY_STRATEGIES = {
     },
     "unknown": {
         "sequence": ["generator", "verifier"],
-        "hint": "缩小修改范围，只改最小可疑函数",
+        "hint": "只修改1个函数，修改≤15行，不触碰报错位置±20行外的代码",
         "search": False,
         "scope_narrow": True,
     },
@@ -127,6 +130,9 @@ class PipelineOrchestrator:
         self.debug_subagent = debug_subagent
         self._value_tracker = ValueTracker()
         self._notifier = FlywheelNotifier()
+        self._strategy_stats = StrategyStats()
+        self._user_patterns = UserPatternMemory()
+        self._telemetry = TelemetryClient()
         self.bus = bus or EventBus()
         self._wink = WinkMonitor()
         self._cognitive_gate = CognitiveGate()
@@ -172,6 +178,14 @@ class PipelineOrchestrator:
             kaiwu_memory=self.memory.load(project_root),
             expert_system_prompt=gate_result.get("system_prompt", ""),
         )
+
+        # 用户错误模式提示注入
+        warning = self._user_patterns.get_warning_hint()
+        if warning:
+            ctx.kaiwu_memory = (ctx.kaiwu_memory + "\n\n" + warning).strip()
+
+        # 错误类型追踪
+        ctx._errors_encountered = []
 
         # 每次顶层任务重置manifest
         self._manifest.clear()
@@ -280,6 +294,10 @@ class PipelineOrchestrator:
             current_error_type = ""
             if ctx.verifier_output:
                 current_error_type = ctx.verifier_output.get("error_type", "unknown")
+
+            # 追踪错误类型用于飞轮统计
+            if current_error_type:
+                ctx._errors_encountered.append(current_error_type)
 
             if not hasattr(ctx, '_error_type_streak'):
                 ctx._error_type_streak = {"type": "", "count": 0}
@@ -538,6 +556,8 @@ class PipelineOrchestrator:
         self._check_milestone(on_status)
         # Reflexion持久化：成功时也记录注意事项
         self._persist_reflection(project_root, ctx, gate_result, success=True)
+        # 飞轮：策略统计 + 用户模式 + 遥测
+        self._record_flywheel(ctx, gate_result, True)
         return {
             "success": True,
             "context": ctx,
@@ -574,6 +594,8 @@ class PipelineOrchestrator:
         self._record_value(project_root, gate_result, False, elapsed, ctx)
         # Reflexion持久化：失败时记录根因
         self._persist_reflection(project_root, ctx, gate_result, success=False)
+        # 飞轮：策略统计 + 用户模式 + 遥测
+        self._record_flywheel(ctx, gate_result, False)
         return {
             "success": False,
             "context": ctx,
@@ -851,6 +873,32 @@ class PipelineOrchestrator:
             )
         except Exception as e:
             logger.debug("Reflection persistence failed (non-blocking): %s", e)
+
+    def _record_flywheel(self, ctx: TaskContext, gate_result: dict, success: bool):
+        """记录策略统计 + 用户错误模式 + 匿名遥测（全部非阻塞）。"""
+        errors = getattr(ctx, '_errors_encountered', [])
+        error_type = errors[-1] if errors else "unknown"
+        try:
+            sequence = EXPERT_SEQUENCES.get(
+                gate_result.get("expert_type", ""), ["generator", "verifier"]
+            )
+            self._strategy_stats.record(
+                error_type=error_type, sequence=sequence,
+                success=success, retries_used=ctx.retry_count,
+            )
+        except Exception as e:
+            logger.debug("Strategy stats failed (non-blocking): %s", e)
+        try:
+            self._user_patterns.record_task(errors, success)
+        except Exception as e:
+            logger.debug("User patterns failed (non-blocking): %s", e)
+        try:
+            self._telemetry.report(
+                error_type=error_type, retry_count=ctx.retry_count,
+                success=success, model=getattr(self, '_model_name', 'unknown'),
+            )
+        except Exception as e:
+            logger.debug("Telemetry failed (non-blocking): %s", e)
 
     def _build_retry_hint(self, ctx: TaskContext, error_type: str) -> str:
         """按错误类型生成重试提示，注入 Generator prompt。"""

@@ -7,10 +7,73 @@
 
 ---
 
-## Current: v1.5.0 (2026-05-06)
+## Current: v1.5.1 (2026-05-06)
 
-451/451 tests green + 67个bench tasks（多语言：Python/Go/TypeScript）。
-架构升级：隔离搜索 + 跨文件契约 + PENCIL压缩 + CLI拆分 + 注释中文化。
+470/470 tests green (451旧 + 19新) + 67个bench tasks。
+三飞轮系统 + 匿名遥测(opt-in) + 服务端部署(https://llmbbs.com)。
+
+### v1.5.1 — Flywheel + Anonymous Telemetry
+
+**三飞轮系统（全部本地）**
+- `flywheel/strategy_stats.py` — 错误策略有效性统计（~/.kwcode/strategy_stats.json）
+  - record(error_type, sequence, success, retries) → 按error_type×sequence累计成功率
+  - get_best_sequence() → min_attempts≥10时返回最优策略，否则用默认
+  - 集成到orchestrator._record_flywheel()，每次任务完成后自动记录
+- `flywheel/user_pattern_memory.py` — 跨项目用户错误模式（~/.kaiwu/user_patterns.json）
+  - record_task() → 统计error_type频率+成功率（滑动平均）
+  - get_warning_hint() → 20+任务后生成中文提示注入ctx.kaiwu_memory
+  - 5种错误类型各有针对性提示（syntax/assertion/import/runtime/patch_apply）
+- `flywheel/skill_drafter.py` — SKILL.md自动提炼（.kaiwu/skill_draft.md）
+  - 30+成功轨迹后自动生成策略草稿
+  - CLI: `kwcode skill review/accept/discard`
+
+**匿名遥测（opt-in，默认关闭）**
+- `telemetry/client.py` — fire-and-forget daemon thread + httpx 3s超时
+  - 只上传4字段：error_type, retry_count, success, model
+  - 绝不上传：代码/路径/描述/用户身份
+- `onboarding.py` — init时询问opt-in（Confirm.ask，default=False）
+- CLI: `kwcode telemetry status/enable/disable`
+- config: `telemetry_enabled` 顶层字段，缺失=关闭（向后兼容）
+
+**服务端（已部署）**
+- https://llmbbs.com → nginx反代 → 127.0.0.1:9753 (FastAPI+SQLite)
+- 3张表：task_events / daily_aggregates / strategy_effectiveness
+- API: POST /api/v1/event, GET /api/v1/health, GET /api/v1/stats
+- systemd: kwcode-telemetry.service, auto-restart
+- Let's Encrypt证书，自动续期
+
+**CLI增强**
+- `kwcode stats` 增强：展示三飞轮状态+遥测状态
+- `kwcode telemetry status/enable/disable` — 遥测管理
+- `kwcode skill review/accept/discard` — SKILL.md草稿管理
+
+**集成点**
+- orchestrator.__init__: +StrategyStats +UserPatternMemory +TelemetryClient
+- orchestrator.run(): ctx创建后注入user_pattern warnings + ctx._errors_encountered追踪
+- orchestrator._record_success/_record_failure_result: 调_record_flywheel()
+- _record_flywheel(): 策略统计 + 用户模式 + 遥测，三路全非阻塞
+
+**Prompt约束量化改造（CC风格）**
+- GENERATOR_BASE_SYSTEM：定性→量化
+  - "只做任务要求的事" → "每次patch只修改≤2个函数，修改行数≤30行"
+  - "不要动无关代码" → "不触碰报错行±20行范围外的无关代码"
+  - "不要加注释" → "不添加任何import/类型注解/docstring/注释到未修改的代码"
+- GENERATOR_PROMPT：
+  - "只修改必要的部分" → "修改行数≤15行，不改动与错误无关的行"
+- RETRY_STRATEGIES hints：
+  - syntax: "不改其他逻辑" → "修改≤5行，不触碰其他函数"
+  - assertion: "只改最小代码" → "只改1个函数，修改≤10行"
+  - unknown: "缩小修改范围" → "只修改1个函数，修改≤15行"
+- CHAT_SYSTEM：
+  - "简短友好回复，2-3句话即可" → "≤100字回复，≤3句话"
+- CHAT_SEARCH_FAIL_SYSTEM：
+  - 整段重写为"回复≤50字"硬约束
+
+**测试：19个新测试**
+- StrategyStats: record/get_best_sequence/min_attempts/persistence/corrupted recovery (5)
+- UserPatternMemory: record/warning_threshold/top_errors/summary/unknown_ignored (6)
+- SkillDrafter: draft_generation/save/exists/insufficient (4)
+- TelemetryClient: disabled_default/enabled_config/non_blocking/skip_disabled (4)
 
 ### v1.5.0 — Isolated Search + Cross-File Contracts
 

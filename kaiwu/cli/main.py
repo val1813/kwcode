@@ -48,6 +48,8 @@ from kaiwu.cli.commands.config import (
     cmd_serve_mcp,
     cmd_setup_search,
     checkpoint_app,
+    telemetry_app,
+    skill_app,
 )
 from kaiwu.cli.commands.task import (
     build_pipeline,
@@ -64,6 +66,8 @@ app = typer.Typer(
 )
 app.add_typer(expert_app)
 app.add_typer(checkpoint_app)
+app.add_typer(telemetry_app)
+app.add_typer(skill_app)
 app.command("init")(cmd_init)
 app.command("memory")(cmd_memory)
 app.command("status")(cmd_status)

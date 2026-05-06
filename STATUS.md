@@ -53,6 +53,24 @@
 - orchestrator._record_success/_record_failure_result: 调_record_flywheel()
 - _record_flywheel(): 策略统计 + 用户模式 + 遥测，三路全非阻塞
 
+**审计日志** (`audit/logger.py`)
+- AuditLogger: start() → log(stage, detail) → write(ctx, elapsed, success, model)
+- 存储：~/.kaiwu/logs/YYYY-MM-DD_HHMMSS_<expert_type>.json
+- 不记录代码内容，只记录：任务描述/Gate分类/专家执行时间/文件名/测试结果/重试次数
+- 最多保留100条，超出自动清理
+- orchestrator._emit()从@staticmethod改为实例方法，每个事件自动记录到audit
+- CLI: `kwcode log` / `kwcode log show <id>` / `kwcode log clear`
+
+**kwcode model命令** (`cli/commands/model_cmd.py`)
+- `kwcode model` — 显示当前模型配置+能力tier
+- `kwcode model set <名称>` — 切换模型（写入config.yaml）
+- `kwcode model probe` — 探测模型详情（Ollama API: family/参数量/量化/reasoning）
+
+**缩进对齐修复** (`Generator._align_indentation`)
+- 修复系统性bug：LLM返回class方法时丢失缩进（0空格 vs 原始4空格）
+- apply_patch替换后方法"跑出"class导致IndentationError
+- 修法：_generate_modified()返回后立刻调_align_indentation()补齐缩进差
+
 **P0: Hashline锚点编辑** (`tools/hashline.py`)
 - add_anchors(): 每行加6字符MD5哈希锚点 `行号|哈希| 内容`
 - parse_anchor_edits(): 解析 EDIT/DELETE/INSERT_AFTER 指令

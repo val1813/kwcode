@@ -55,6 +55,8 @@ from kaiwu.cli.commands.task import (
     build_pipeline,
     run_task,
 )
+from kaiwu.cli.commands.log_cmd import log_app
+from kaiwu.cli.commands.model_cmd import model_app
 from kaiwu.cli.repl import repl
 
 app = typer.Typer(
@@ -68,6 +70,8 @@ app.add_typer(expert_app)
 app.add_typer(checkpoint_app)
 app.add_typer(telemetry_app)
 app.add_typer(skill_app)
+app.add_typer(log_app)
+app.add_typer(model_app)
 app.command("init")(cmd_init)
 app.command("memory")(cmd_memory)
 app.command("status")(cmd_status)

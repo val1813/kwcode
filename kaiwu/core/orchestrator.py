@@ -40,6 +40,7 @@ from kaiwu.notification.flywheel_notifier import FlywheelNotifier
 from kaiwu.flywheel.strategy_stats import StrategyStats
 from kaiwu.flywheel.user_pattern_memory import UserPatternMemory
 from kaiwu.telemetry.client import TelemetryClient
+from kaiwu.audit.logger import AuditLogger
 
 logger = logging.getLogger(__name__)
 
@@ -133,6 +134,7 @@ class PipelineOrchestrator:
         self._strategy_stats = StrategyStats()
         self._user_patterns = UserPatternMemory()
         self._telemetry = TelemetryClient()
+        self._audit = AuditLogger()
         self.bus = bus or EventBus()
         self._wink = WinkMonitor()
         self._cognitive_gate = CognitiveGate()
@@ -156,6 +158,7 @@ class PipelineOrchestrator:
         Returns {"success": bool, "context": TaskContext, "error": str|None, "elapsed": float}.
         """
         start_time = time.time()
+        self._audit.start()
 
         # 任务级超时看门狗
         TASK_TIMEOUT_S = 300  # 单任务最长5分钟
@@ -573,6 +576,8 @@ class PipelineOrchestrator:
         self._persist_reflection(project_root, ctx, gate_result, success=True)
         # 飞轮：策略统计 + 用户模式 + 遥测
         self._record_flywheel(ctx, gate_result, True)
+        # 审计日志
+        self._audit.write(ctx, elapsed, True, getattr(self, '_model_name', 'unknown'))
         return {
             "success": True,
             "context": ctx,
@@ -611,6 +616,8 @@ class PipelineOrchestrator:
         self._persist_reflection(project_root, ctx, gate_result, success=False)
         # 飞轮：策略统计 + 用户模式 + 遥测
         self._record_flywheel(ctx, gate_result, False)
+        # 审计日志
+        self._audit.write(ctx, elapsed, False, getattr(self, '_model_name', 'unknown'))
         return {
             "success": False,
             "context": ctx,
@@ -823,12 +830,12 @@ class PipelineOrchestrator:
             logger.debug("Reviewer failed (non-blocking): %s", e)
             return {"aligned": True, "confidence": 0.0, "gap": ""}
 
-    @staticmethod
-    def _emit(callback, stage: str, detail: str):
-        """Emit status update if callback provided."""
+    def _emit(self, callback, stage: str, detail: str):
+        """Emit status update if callback provided. Also logs to audit."""
         if callback:
             callback(stage, detail)
         logger.info("[%s] %s", stage, detail)
+        self._audit.log(stage, detail)
 
     def _get_max_retries(self, gate_result: dict) -> int:
         """Dynamic retry budget based on task difficulty."""

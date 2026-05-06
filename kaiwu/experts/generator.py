@@ -277,6 +277,9 @@ class GeneratorExpert:
                 if not modified:
                     continue
 
+                # 对齐缩进：LLM返回的modified可能丢失class内方法的缩进
+                modified = self._align_indentation(original, modified)
+
                 # Verify original exists in file (should always be true since we read it)
                 if original not in content:
                     logger.error("Extracted original not found in file — this should not happen")
@@ -572,6 +575,46 @@ class GeneratorExpert:
         }
         ctx.generator_output = result
         return result
+
+    @staticmethod
+    def _align_indentation(original: str, modified: str) -> str:
+        """
+        让modified的基础缩进和original保持一致。
+        解决LLM生成class方法时丢失缩进的系统性bug：
+        original有4空格缩进（class内方法），但LLM返回0空格（顶层函数），
+        apply_patch替换后方法"跑出"class，导致IndentationError。
+        """
+        orig_lines = original.split("\n")
+        mod_lines = modified.split("\n")
+        if not orig_lines or not mod_lines:
+            return modified
+
+        # 获取original第一个非空行的缩进
+        orig_indent = 0
+        for line in orig_lines:
+            if line.strip():
+                orig_indent = len(line) - len(line.lstrip())
+                break
+
+        # 获取modified第一个非空行的缩进
+        mod_indent = 0
+        for line in mod_lines:
+            if line.strip():
+                mod_indent = len(line) - len(line.lstrip())
+                break
+
+        diff = orig_indent - mod_indent
+        if diff <= 0:
+            return modified  # modified缩进已经>=original，不需要调整
+
+        pad = " " * diff
+        aligned = []
+        for line in mod_lines:
+            if line.strip():  # 非空行加缩进
+                aligned.append(pad + line)
+            else:
+                aligned.append(line)
+        return "\n".join(aligned)
 
     @staticmethod
     def _extract_function(content: str, func_name: str) -> Optional[str]:

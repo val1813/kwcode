@@ -69,12 +69,61 @@ def _detect_project_language(project_root: str, tool_executor: ToolExecutor) -> 
     return "python"
 
 
+_TOOLCHAIN_CMDS = {
+    "go": ("go version", "apt-get install -y golang-go"),
+    "typescript": ("npx --version", "apt-get install -y nodejs npm"),
+    "javascript": ("node --version", "apt-get install -y nodejs"),
+    "rust": ("cargo --version", "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y"),
+    "java": ("javac -version", "apt-get install -y default-jdk"),
+}
+
+
 class VerifierExpert:
     """Deterministic verification: syntax check → apply patch → run tests."""
 
     def __init__(self, llm: LLMBackend, tool_executor: ToolExecutor):
         self.llm = llm
         self.tools = tool_executor
+
+    def run_tests_only(self, ctx: TaskContext) -> dict:
+        """
+        只运行测试，不做patch/syntax。用于pre-test定位。
+        返回 {"passed": int, "total": int, "output": str, "error_type": str}
+        """
+        project_lang = _detect_project_language(ctx.project_root, self.tools)
+
+        # 先检测工具链
+        toolchain_err = self._check_toolchain(project_lang, ctx.project_root)
+        if toolchain_err:
+            return {"passed": 0, "total": 0, "output": toolchain_err,
+                    "error_type": "missing_toolchain"}
+
+        passed, total, error = self._run_tests(ctx)
+        return {"passed": passed, "total": total, "output": error,
+                "error_type": self._classify_error(error)["error_type"] if error else ""}
+
+    def _check_toolchain(self, lang: str, project_root: str) -> str:
+        """检测工具链是否存在。返回错误信息或空字符串。"""
+        check = _TOOLCHAIN_CMDS.get(lang)
+        if not check:
+            return ""
+        cmd, install_cmd = check
+        try:
+            _, stderr, rc = self.tools.run_bash(cmd, cwd=project_root)
+            if rc != 0:
+                # 尝试自动安装
+                logger.info("[verifier] %s not found, installing: %s", lang, install_cmd)
+                _, install_err, install_rc = self.tools.run_bash(install_cmd, cwd=project_root, timeout=120)
+                if install_rc != 0:
+                    return f"Toolchain missing: {lang}. Install failed: {install_err[:200]}"
+                # 验证安装成功
+                _, _, rc2 = self.tools.run_bash(cmd, cwd=project_root)
+                if rc2 != 0:
+                    return f"Toolchain missing: {lang}. Install succeeded but still not found."
+                logger.info("[verifier] %s installed successfully", lang)
+        except Exception as e:
+            logger.debug("[verifier] toolchain check failed: %s", e)
+        return ""
 
     def run(self, ctx: TaskContext) -> Optional[dict]:
         """
@@ -219,6 +268,9 @@ class VerifierExpert:
                 cwd=project_root,
             )
             if rc != 0:
+                # 区分工具链缺失 vs 真实语法错误
+                if "not found" in stderr.lower() or "no such file" in stderr.lower():
+                    return None  # 工具链问题，不报语法错误
                 return f"{fpath}: {stderr.strip()}"
 
         elif ext in (".ts", ".tsx"):
@@ -327,14 +379,20 @@ class VerifierExpert:
         if project_lang == "python":
             _, _, rc = self.tools.run_bash("python -m pytest --version", cwd=ctx.project_root)
             if rc != 0:
-                # No pytest, try unittest only
                 runners = [("unittest", "python -m unittest discover -s tests -q")]
 
-            # Check if tests directory exists
+            # 扫描所有测试文件，不只看tests/目录
+            test_files = self._find_test_files(ctx.project_root, "python")
+            if not test_files:
+                return 0, 0, ""  # 真的没有测试文件
+
+            # 如果测试文件不在tests/目录，用文件路径直接跑
             test_dirs = self.tools.list_dir(ctx.project_root)
-            has_tests = any(d in ("tests", "test") for d in test_dirs if not d.startswith("[ERROR]"))
-            if not has_tests:
-                return 0, 0, ""  # No tests to run
+            has_tests_dir = any(d in ("tests", "test") for d in test_dirs if not d.startswith("[ERROR]"))
+            if not has_tests_dir and test_files:
+                # 测试文件在project_root（如 xxx_test.py），直接用文件路径
+                test_paths = " ".join(f'"{f}"' for f in test_files[:10])
+                runners = [("pytest_files", f"python -m pytest {test_paths} --tb=short -q")]
 
         elif project_lang == "go":
             # Go always has tests if go.mod exists
@@ -507,6 +565,26 @@ class VerifierExpert:
             return total - failed, total
 
         return 0, 0
+
+    def _find_test_files(self, project_root: str, language: str = "python") -> list[str]:
+        """扫描project_root下所有测试文件，不只看tests/目录。"""
+        import glob as _glob
+        patterns_by_lang = {
+            "python": ["**/test_*.py", "**/*_test.py"],
+            "go": ["**/*_test.go"],
+            "typescript": ["**/*.test.ts", "**/*.spec.ts"],
+            "javascript": ["**/*.test.js", "**/*.spec.js"],
+            "rust": [],  # Rust tests inline in src files
+            "java": ["**/Test*.java", "**/*Test.java"],
+        }
+        patterns = patterns_by_lang.get(language, patterns_by_lang["python"])
+        found = []
+        for pattern in patterns:
+            found.extend(_glob.glob(
+                os.path.join(project_root, pattern),
+                recursive=True,
+            ))
+        return found
 
     def _rollback(self, backups: dict[str, str]):
         """Restore original file contents."""

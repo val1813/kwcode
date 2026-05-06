@@ -10,7 +10,7 @@
 ## Current: v1.5.1 (2026-05-06)
 
 501/501 tests green + 67个bench tasks。
-三飞轮 + 匿名遥测 + Hashline锚点编辑 + AdaptThink + Fast/Slow双阶段 + 审计日志 + model命令 + model_capability全量接入 + ctx自适应主动设置 + prompt量化改造。
+三飞轮 + 匿名遥测 + Hashline + AdaptThink + Fast/Slow + 审计日志 + model命令 + model_capability全接入 + ctx自适应 + prompt量化 + Test-First Loop + 工具链自动安装。
 
 ### v1.5.1 — Flywheel + Anonymous Telemetry
 
@@ -96,6 +96,23 @@
 - Hashline: anchors/strip/parse/apply/mismatch/delete/insert/roundtrip (12)
 - ThinkConfig: easy/hard/chat/unknown/apply_tokens (8)
 - FastSlow: default/escalation (1)
+
+**Test-First Loop（CC架构核心改动）**
+- orchestrator.run()：locator_repair/refactor任务先调verifier.run_tests_only()拿测试报错
+- locator.locate_from_test_error()：从pytest/go test报错提取File+行号，精准定位（不靠语义搜索猜）
+- 优先级：test_error定位 > BM25+图 > LLM猜，test_error成功则跳过语义搜索
+- 解决benchmark36/37任务"audit成功但bench失败"的根因：Verifier 0/0假成功
+
+**Verifier修复（P0影响所有结果）**
+- 测试文件发现：扫描project_root下`*_test.py`/`test_*.py`/`*_test.go`/`*.test.ts`，不只看tests/目录
+- 找不到测试文件才返回0/0，有测试文件但没在tests/时用文件路径直接跑pytest
+- 工具链检测：go/node/rust/java缺失时自动安装（apt-get），不再报syntax error
+- Go语法检查：go: not found不报语法错误（返回None跳过）
+
+**Locator增强**
+- locate_from_test_error()：从Python/Go/TS测试报错提取文件名+行号+函数名
+- 过滤test文件和stdlib，只返回业务代码文件
+- import语句提取被测模块名，反向定位源文件
 
 **Prompt约束量化改造（CC风格）**
 - GENERATOR_BASE_SYSTEM：定性→量化

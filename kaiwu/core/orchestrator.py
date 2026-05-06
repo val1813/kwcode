@@ -256,6 +256,21 @@ class PipelineOrchestrator:
 
         self._emit(on_status, "gate", f"任务类型：{expert_type} | 难度：{gate_result.get('difficulty', '?')}")
 
+        # ── Test-First Loop：先跑测试拿失败输出，精准定位 ──
+        if expert_type in ("locator_repair", "refactor") and "locator" in sequence:
+            try:
+                self._emit(on_status, "pre_test", "先运行测试获取报错...")
+                pre_result = self.verifier.run_tests_only(ctx)
+                if pre_result.get("output"):
+                    ctx.initial_test_failure = pre_result["output"]
+                    self._emit(on_status, "pre_test_done",
+                               f"测试 {pre_result['passed']}/{pre_result['total']}，"
+                               f"定位信号已获取")
+                elif pre_result.get("error_type") == "missing_toolchain":
+                    self._emit(on_status, "toolchain", pre_result["output"][:100])
+            except Exception as e:
+                logger.debug("Pre-test failed (non-blocking): %s", e)
+
         # 经验回放 + 预搜索 + 计划生成
         self._prepare_context(ctx, gate_result, expert_type, user_input, project_root, no_search, on_status)
 

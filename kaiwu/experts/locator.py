@@ -114,8 +114,17 @@ class LocatorExpert:
 
     def run(self, ctx: TaskContext) -> Optional[dict]:
         """
-        Main entry: BM25+graph primary path, LLM fallback.
+        Main entry: test-error-first → BM25+graph → LLM fallback.
         """
+        # 优先级最高：从pre-test失败输出精准定位
+        pre_test = getattr(ctx, 'initial_test_failure', '')
+        if pre_test:
+            error_result = self.locate_from_test_error(pre_test, ctx.project_root)
+            if error_result and error_result.get("relevant_files"):
+                logger.info("[locator] test-error定位成功: %s", error_result["relevant_files"])
+                ctx.locator_output = error_result
+                return error_result
+
         task_desc = f"{ctx.user_input}"
         if ctx.search_results:
             task_desc += f"\n\n参考信息：\n{ctx.search_results}"
@@ -131,6 +140,60 @@ class LocatorExpert:
         # 降级：LLM文件树 + AST
         logger.info("[locator] graph path returned nothing, falling back to LLM")
         return self._llm_locate(ctx, task_desc)
+
+    def locate_from_test_error(self, error_output: str, project_root: str) -> Optional[dict]:
+        """
+        从测试失败输出精准定位需要修改的文件和函数。
+        比语义搜索准确——测试报错直接包含文件名和行号。
+        """
+        files = set()
+        functions = set()
+        edit_locations = []
+
+        # Python: File "config_chain.py", line 47, in get_all
+        for m in re.finditer(r'File "([^"]+)", line (\d+)(?:, in (\w+))?', error_output):
+            fpath = m.group(1)
+            line = int(m.group(2))
+            func = m.group(3) or ""
+            # 过滤测试文件本身和stdlib
+            if "test_" in os.path.basename(fpath) or "/lib/" in fpath or "site-packages" in fpath:
+                continue
+            # 转为相对路径
+            if os.path.isabs(fpath):
+                try:
+                    fpath = os.path.relpath(fpath, project_root)
+                except ValueError:
+                    pass
+            files.add(fpath)
+            if func and func != "<module>":
+                functions.add(func)
+            edit_locations.append({"file": fpath, "line": line, "function": func})
+
+        # Go: middleware.go:23: undefined: HandleRequest
+        for m in re.finditer(r'(\w[\w./]*\.go):(\d+):', error_output):
+            fpath = m.group(1)
+            line = int(m.group(2))
+            files.add(fpath)
+            edit_locations.append({"file": fpath, "line": line, "function": ""})
+
+        # import/from语句提取被测模块名
+        for m in re.finditer(r'(?:from|import)\s+([\w.]+)', error_output):
+            mod = m.group(1).replace(".", "/")
+            for ext in (".py", ".go", ".ts", ".js"):
+                candidate = mod + ext
+                full = os.path.join(project_root, candidate)
+                if os.path.exists(full):
+                    files.add(candidate)
+
+        if not files:
+            return None
+
+        return {
+            "relevant_files": list(files)[:5],
+            "relevant_functions": list(functions)[:5],
+            "edit_locations": edit_locations[:10],
+            "method": "test_error_extraction",
+        }
 
     def _graph_locate(self, ctx: TaskContext, task_desc: str) -> Optional[dict]:
         """BM25+graph retrieval (no LLM calls)."""

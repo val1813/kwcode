@@ -9,7 +9,8 @@
 
 ## Current: v1.5.0 (2026-05-06)
 
-451/451 tests green. Architecture upgrade: isolated search + cross-file contracts + PENCIL compression.
+451/451 tests green + 67个bench tasks（多语言：Python/Go/TypeScript）。
+架构升级：隔离搜索 + 跨文件契约 + PENCIL压缩 + CLI拆分 + 注释中文化。
 
 ### v1.5.0 — Isolated Search + Cross-File Contracts
 
@@ -140,9 +141,14 @@ kwcode/
 ├── STATUS.md
 └── kaiwu/
     ├── cli/
-    │   ├── main.py              # REPL + EventBus rendering + spinner + summary
-    │   ├── status_bar.py        # Status bar (4-tier adaptive)
-    │   └── onboarding.py        # First-run onboarding
+    │   ├── main.py              # 入口（173行）+ Typer路由
+    │   ├── commands/task.py     # run/chat/vision/multi-task命令
+    │   ├── commands/expert.py   # expert list/info/export/install
+    │   ├── commands/config.py   # init/api/serve/setup-search
+    │   ├── formatters.py        # Rich输出格式化
+    │   ├── repl.py              # REPL交互循环
+    │   ├── status_bar.py        # 状态栏(4档自适应)
+    │   └── onboarding.py        # 首次启动引导
     ├── core/
     │   ├── event_bus.py         # Unified event bus (append-only + replay)
     │   ├── cognitive_gate.py    # Diminishing returns detection
@@ -181,20 +187,21 @@ kwcode/
     ├── mcp/                     # MCP Router
     ├── llm/                     # Ollama + llama.cpp backends
     ├── tools/                   # 5 deterministic tools + ToolGateway
-    └── tests/                   # 451 tests
+    └── tests/                   # 451 unit tests + 67 bench tasks (Python/Go/TS)
 ```
 
 ---
 
 ## TODO
 
-1. ~~CLI refactor: split main.py (1861 lines) into cli/commands/~~ ✅ v1.5.0
-2. ~~Comments: unify to Chinese across all modules~~ ✅ v1.5.0
-3. ~~Expert-level EventBus emit (file reads, function locations, test results)~~ ✅ v1.5.0
-4. SQLite cross-session queries
-5. Full expert benchmark (12 presets)
-6. pip publish to PyPI
-7. install.ps1 / install.sh one-click install
+1. ~~CLI拆分：main.py 1861→173行~~ ✅ v1.5.0
+2. ~~注释统一中文~~ ✅ v1.5.0
+3. ~~专家细粒度EventBus emit~~ ✅ v1.5.0
+4. ~~bench tasks多语言覆盖（67题 Python/Go/TS）~~ ✅ v1.5.0
+5. SQLite跨session查询
+6. pip publish到PyPI（v1.5.0）
+7. install.ps1 / install.sh一键安装
+8. SWE-bench评测（用评测VPS跑）
 
 ## Known Issues
 

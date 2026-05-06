@@ -142,7 +142,10 @@ class DebugSubagent:
             json_match = re.search(r'\{[^}]+\}', response)
             if not json_match:
                 return None
-            strategy = json.loads(json_match.group())
+            try:
+                strategy = json.loads(json_match.group())
+            except (json.JSONDecodeError, ValueError):
+                return None
             # 验证必要字段
             if "file" not in strategy or "line" not in strategy:
                 return None
@@ -201,7 +204,10 @@ class DebugSubagent:
             marker = "__DEBUG_JSON__"
             if marker in stdout:
                 json_str = stdout.split(marker)[-1].strip()
-                return json.loads(json_str)
+                try:
+                    return json.loads(json_str)
+                except (json.JSONDecodeError, ValueError):
+                    return None
 
             return None
 

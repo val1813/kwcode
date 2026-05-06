@@ -150,14 +150,41 @@ def _detect_from_name(model_name: str) -> ModelTier:
     return ModelTier.MEDIUM
 
 
+# 已知模型的精确ctx值（查不到API时用）
+_KNOWN_CTX = {
+    "qwen2.5-coder:7b": 32768, "qwen2.5-coder:14b": 32768, "qwen2.5-coder:32b": 32768,
+    "qwen3:8b": 32768, "qwen3:14b": 32768, "qwen3:30b-a3b": 32768, "qwen3:72b": 32768,
+    "deepseek-r1:8b": 65536, "deepseek-r1:14b": 65536, "deepseek-r1:32b": 65536,
+    "deepseek-r1:70b": 65536,
+    "gemma3:4b": 8192, "gemma4:e2b": 8192,
+    "llama3:8b": 8192, "llama3:70b": 8192,
+    "codellama:7b": 16384, "codellama:13b": 16384, "codellama:34b": 16384,
+}
+
+
 def get_effective_ctx(model_name: str,
                       ollama_url: str = "http://localhost:11434") -> int:
     """
-    获取当前模型实际可用的ctx大小。
-    查询链：llama.cpp /props → vLLM /v1/models → Ollama modelinfo → 按tier默认值。
-    失败全部静默，返回保守默认值。
+    获取当前模型实际可用的ctx大小。kwcode主动设ctx，不依赖用户配置。
+
+    查询链（四层，任何层失败静默进下一层）：
+    1. llama.cpp /props → 运行时真实n_ctx
+    2. vLLM /v1/models → max_model_len
+    3. Ollama /api/show → modelinfo.llama.context_length（原生上限）
+    4. 离线知识库 + 环境判断兜底
+
+    返回值会被传给llama_backend，Ollama调用时自动在options里带num_ctx。
     """
     import httpx
+
+    # 用户config.yaml手动配了ctx → 最高优先级
+    try:
+        from kaiwu.cli.onboarding import load_config
+        user_ctx = load_config().get("default", {}).get("ctx")
+        if user_ctx and int(user_ctx) > 0:
+            return int(user_ctx)
+    except Exception:
+        pass
 
     # 1. llama.cpp /props → 运行时真实值，最准
     try:
@@ -165,7 +192,7 @@ def get_effective_ctx(model_name: str,
         if r.status_code == 200:
             n_ctx = r.json().get("n_ctx")
             if n_ctx and n_ctx > 0:
-                return int(n_ctx * 0.8)
+                return int(n_ctx)
     except Exception:
         pass
 
@@ -176,11 +203,11 @@ def get_effective_ctx(model_name: str,
         if r.status_code == 200:
             data = r.json().get("data", [])
             if data and "max_model_len" in data[0]:
-                return int(data[0]["max_model_len"] * 0.8)
+                return int(data[0]["max_model_len"])
     except Exception:
         pass
 
-    # 3. Ollama /api/show → modelinfo.llama.context_length（模型原生上限）
+    # 3. Ollama /api/show → modelinfo.llama.context_length（模型权重决定的原生上限）
     try:
         r = httpx.post(
             f"{ollama_url}/api/show",
@@ -191,18 +218,29 @@ def get_effective_ctx(model_name: str,
             data = r.json()
             native_ctx = data.get("modelinfo", {}).get("llama.context_length", 0)
             if native_ctx > 0:
-                # 原生上限取80%，且不超过65536（避免本地推理速度崩）
-                return min(int(native_ctx * 0.8), 65536)
+                # 原生上限cap到65536（超大ctx对本地推理速度影响大）
+                return min(native_ctx, 65536)
     except Exception:
         pass
 
-    # 4. 按tier给保守默认值
+    # 4. 离线兜底
+    # 4a. 云API（非localhost）→ 128K
+    if "localhost" not in ollama_url and "127.0.0.1" not in ollama_url:
+        return 131072
+
+    # 4b. 已知模型精确值
+    name_lower = model_name.lower()
+    if name_lower in _KNOWN_CTX:
+        return _KNOWN_CTX[name_lower]
+
+    # 4c. 按tier给保守默认值
     tier = detect_model_tier(model_name, ollama_url)
-    return {
+    defaults = {
         ModelTier.SMALL: 16384,
         ModelTier.MEDIUM: 32768,
         ModelTier.LARGE: 65536,
-    }[tier]
+    }
+    return defaults.get(tier, 8192)
 
 
 def get_strategy(tier: ModelTier) -> ModelStrategy:

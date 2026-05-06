@@ -60,6 +60,7 @@ class LLMBackend:
         self.ollama_model = ollama_model
         self.api_key = api_key
         self.verbose = verbose
+        self._effective_ctx = n_ctx  # 主动设ctx，Ollama调用时自动带num_ctx
         self._llm: Optional[object] = None
         self._mode = "none"
         self._is_reasoning = self._detect_reasoning_model(ollama_model)
@@ -305,6 +306,7 @@ class LLMBackend:
             "options": {
                 "num_predict": effective_tokens,
                 "temperature": effective_temp,
+                "num_ctx": self._effective_ctx,  # 主动设ctx，不让Ollama用默认2048截断
             },
         }
 

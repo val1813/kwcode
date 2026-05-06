@@ -157,12 +157,17 @@ class Checkpoint:
         import json
         manifest_path = self._file_backup_dir / "_manifest.json"
         if manifest_path.exists():
-            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-            for rel, original_path in manifest.items():
-                backup_file = self._file_backup_dir / rel
-                if backup_file.exists():
-                    shutil.copy2(backup_file, original_path)
-            return True
+            try:
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                logger.debug("Manifest JSON damaged, falling back to name-based restore")
+                manifest = None
+            if manifest:
+                for rel, original_path in manifest.items():
+                    backup_file = self._file_backup_dir / rel
+                    if backup_file.exists():
+                        shutil.copy2(backup_file, original_path)
+                return True
 
         # Fallback: simple name-based restore
         for f in self._file_backup_dir.rglob("*"):
@@ -201,7 +206,10 @@ def restore_latest() -> bool:
     import json
     manifest_path = backup_dir / "_manifest.json"
     if manifest_path.exists():
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return False
         for rel, original_path in manifest.items():
             backup_file = backup_dir / rel
             if backup_file.exists():

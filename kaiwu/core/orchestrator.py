@@ -194,6 +194,10 @@ class PipelineOrchestrator:
 
         # 模型能力等级注入ctx
         ctx.model_tier = self._model_tier.value
+        try:
+            ctx.effective_ctx = getattr(self.generator.llm, '_effective_ctx', 32768)
+        except AttributeError:
+            ctx.effective_ctx = 32768
 
         # 用户错误模式提示注入
         warning = self._user_patterns.get_warning_hint()

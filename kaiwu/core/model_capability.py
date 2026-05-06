@@ -152,6 +152,7 @@ def _detect_from_name(model_name: str) -> ModelTier:
 
 # 已知模型的精确ctx值（查不到API时用）
 _KNOWN_CTX = {
+    # Ollama本地模型
     "qwen2.5-coder:7b": 32768, "qwen2.5-coder:14b": 32768, "qwen2.5-coder:32b": 32768,
     "qwen3:8b": 32768, "qwen3:14b": 32768, "qwen3:30b-a3b": 32768, "qwen3:72b": 32768,
     "deepseek-r1:8b": 65536, "deepseek-r1:14b": 65536, "deepseek-r1:32b": 65536,
@@ -159,6 +160,14 @@ _KNOWN_CTX = {
     "gemma3:4b": 8192, "gemma4:e2b": 8192,
     "llama3:8b": 8192, "llama3:70b": 8192,
     "codellama:7b": 16384, "codellama:13b": 16384, "codellama:34b": 16384,
+}
+
+# 云API模型的ctx（按模型名子串匹配）
+_CLOUD_CTX = {
+    "deepseek-v4": 131072, "deepseek-v3": 65536, "deepseek-r1": 65536,
+    "qwen-max": 131072, "qwen-plus": 131072, "qwen-turbo": 32768,
+    "qwen2.5-coder": 32768, "qwen3": 32768,
+    "glm-4": 128000, "kimi": 131072,
 }
 
 
@@ -192,7 +201,7 @@ def get_effective_ctx(model_name: str,
         if r.status_code == 200:
             n_ctx = r.json().get("n_ctx")
             if n_ctx and n_ctx > 0:
-                return int(n_ctx)
+                return int(n_ctx * 0.9)
     except Exception:
         pass
 
@@ -203,7 +212,7 @@ def get_effective_ctx(model_name: str,
         if r.status_code == 200:
             data = r.json().get("data", [])
             if data and "max_model_len" in data[0]:
-                return int(data[0]["max_model_len"])
+                return int(data[0]["max_model_len"] * 0.9)
     except Exception:
         pass
 
@@ -218,29 +227,33 @@ def get_effective_ctx(model_name: str,
             data = r.json()
             native_ctx = data.get("modelinfo", {}).get("llama.context_length", 0)
             if native_ctx > 0:
-                # 原生上限cap到65536（超大ctx对本地推理速度影响大）
-                return min(native_ctx, 65536)
+                # 取90%且不超过128K
+                return min(int(native_ctx * 0.9), 131072)
     except Exception:
         pass
 
-    # 4. 离线兜底
-    # 4a. 云API（非localhost）→ 128K
-    if "localhost" not in ollama_url and "127.0.0.1" not in ollama_url:
+    # 4. 离线知识库
+    name_lower = model_name.lower()
+
+    # 4a. 云API（非localhost）→ 先查云API模型表，再给默认128K
+    is_local = "localhost" in ollama_url or "127.0.0.1" in ollama_url
+    if not is_local:
+        for key, ctx in _CLOUD_CTX.items():
+            if key in name_lower:
+                return ctx
         return 131072
 
-    # 4b. 已知模型精确值
-    name_lower = model_name.lower()
+    # 4b. 已知本地模型精确值
     if name_lower in _KNOWN_CTX:
         return _KNOWN_CTX[name_lower]
 
     # 4c. 按tier给保守默认值
     tier = detect_model_tier(model_name, ollama_url)
-    defaults = {
+    return {
         ModelTier.SMALL: 16384,
         ModelTier.MEDIUM: 32768,
         ModelTier.LARGE: 65536,
-    }
-    return defaults.get(tier, 8192)
+    }.get(tier, 8192)
 
 
 def get_strategy(tier: ModelTier) -> ModelStrategy:

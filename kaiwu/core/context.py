@@ -85,3 +85,6 @@ class TaskContext:
 
     # 模型能力等级（orchestrator检测后写入，Generator按此调整约束）
     model_tier: str = ""  # "small"/"medium"/"large"
+
+    # 实际可用ctx大小（orchestrator检测后写入）
+    effective_ctx: int = 32768

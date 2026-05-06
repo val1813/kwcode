@@ -27,14 +27,15 @@ class Aggregate:
         )
         self._pending_events.append(event)
         self._apply(event)
-        self._version += 1
+        # BUG: _version is NOT incremented here, so all pending events get
+        # the same version number and save() passes the wrong expected_version.
         return event
 
     def save(self, store: EventStore) -> None:
         """Persist pending events to the store."""
         for event in self._pending_events:
-            # Bug: passes self._version instead of event.version as expected_version
             store.append(event, expected_version=self._version)
+            self._version += 1
         self._pending_events.clear()
 
     @classmethod

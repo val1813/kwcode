@@ -317,9 +317,19 @@ class GeneratorExpert:
         # Build prompt based on retry_strategy
         prompt = self._build_retry_prompt(ctx, fpath, original, task_desc, search_ctx)
 
-        # Append doc_context if available
+        # Inject upstream constraints from SearchSubagent (cross-file contracts)
+        upstream_constraints = getattr(ctx, '_upstream_constraints', "")
+        if upstream_constraints:
+            prompt += f"\n\n## 跨文件契约（必须遵守）\n{upstream_constraints}"
+
+        # Append doc_context if available (keep concise)
         if ctx.doc_context:
-            prompt += f"\n\n## 相关文档参考\n{ctx.doc_context}"
+            prompt += f"\n\n## 相关文档参考\n{ctx.doc_context[:800]}"
+
+        # Inject retry_hint if available
+        retry_hint = getattr(ctx, 'retry_hint', "")
+        if retry_hint:
+            prompt += f"\n\n## 重试提示\n{retry_hint}"
 
         system = self._build_system(ctx)
 

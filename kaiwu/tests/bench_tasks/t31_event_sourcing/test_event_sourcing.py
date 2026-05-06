@@ -1,9 +1,9 @@
-"""Tests for the event sourcing system (event_store, aggregate, projection)."""
+"""Tests for the event sourcing system (event_store, aggregate, projector)."""
 
 import pytest
 from event_store import Event, EventStore, ConcurrencyError
 from aggregate import BankAccount
-from projection import AccountSummaryProjection
+from projector import AccountSummaryProjection
 
 
 class TestEventStore:
@@ -18,7 +18,7 @@ class TestEventStore:
     def test_version_check_passes_on_empty_stream(self):
         store = EventStore()
         e = Event("e1", "acc-1", "AccountOpened", {"owner": "Alice", "amount": 100}, 0)
-        # expected_version=0 means we expect the stream to have 0 events
+        # expected_version=0 means we expect the stream to have 0 events already
         store.append(e, expected_version=0)
         assert store.get_version("acc-1") == 1
 
@@ -102,28 +102,40 @@ class TestBankAccount:
         acc.withdraw(50)
         acc.save(store)
 
-        # Reconstruct from events
         acc2 = BankAccount.load_from_store("acc-1", store)
         assert acc2.balance == 350
         assert acc2.owner == "Alice"
         assert acc2.is_open is True
 
     def test_save_multiple_events_sequential_versions(self):
-        """Each save call should use the correct expected_version."""
+        """Saving two events in one batch must use sequential expected_versions."""
         store = EventStore()
         acc = BankAccount("acc-1")
         acc.open("Alice", 100)
         acc.save(store)
         acc.deposit(50)
         acc.deposit(25)
-        # Saving two events at once — versions must be sequential
         acc.save(store)
         assert store.get_version("acc-1") == 3
+
+    def test_multiple_save_cycles(self):
+        """Each save cycle must advance the version correctly."""
+        store = EventStore()
+        acc = BankAccount("acc-1")
+        acc.open("Alice", 100)
+        acc.save(store)
+        acc.deposit(10)
+        acc.save(store)
+        acc.deposit(20)
+        acc.save(store)
+        acc.deposit(30)
+        acc.save(store)
+        assert store.get_version("acc-1") == 4
+        assert acc.balance == 160
 
 
 class TestProjection:
     def test_rebuild_correct_order(self):
-        """Projection rebuild must process events in chronological order."""
         store = EventStore()
         acc = BankAccount("acc-1")
         acc.open("Alice", 1000)

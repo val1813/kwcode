@@ -115,6 +115,26 @@ GENERATOR_PROMPT = """你是代码修复/生成专家。根据任务描述，修
 4. 不要用markdown代码块包裹
 5. 不要解释，只输出代码"""
 
+HASHLINE_PROMPT = """你是代码修复专家。用锚点编辑指令修改代码，不要复现整个函数。
+
+任务描述：{task_description}
+
+代码（来自 {file_path}，每行格式: 行号|哈希|内容）：
+{anchored_code}
+
+{search_context}
+
+只输出编辑指令，每行一条，格式：
+  EDIT 行号|哈希| → 新内容
+  DELETE 行号|哈希|
+  INSERT_AFTER 行号|哈希| → 新行内容
+
+规则：
+1. 只修改需要改的行，≤10条指令
+2. 哈希必须与上面代码中的完全一致
+3. 保持原始缩进风格
+4. 不要输出其他内容，只输出编辑指令"""
+
 GENERATOR_NEWFILE_PROMPT = """你是代码生成专家。根据任务描述生成文件内容。
 
 任务描述：{task_description}
@@ -301,11 +321,19 @@ class GeneratorExpert:
         return any(kw in lower for kw in _WEB_KEYWORDS)
 
     def _generate_modified(self, ctx: TaskContext, fpath: str, original: str, task_desc: str) -> Optional[str]:
-        """Ask LLM to generate modified code. Uses retry_strategy to vary prompt."""
+        """Ask LLM to generate modified code. Hashline primary, full-function fallback."""
         search_ctx = ""
         if ctx.search_results:
             search_ctx = f"参考资料：\n{ctx.search_results}"
 
+        # ── Hashline path: anchor-based editing (token-efficient) ──
+        if ctx.retry_strategy == 0:  # First attempt: try hashline
+            result = self._try_hashline(ctx, fpath, original, task_desc, search_ctx)
+            if result:
+                return result
+            logger.debug("Hashline failed, falling back to full-function generation")
+
+        # ── Fallback: full function generation ──
         # Build prompt based on retry_strategy
         prompt = self._build_retry_prompt(ctx, fpath, original, task_desc, search_ctx)
 
@@ -324,14 +352,63 @@ class GeneratorExpert:
 
         system = self._build_system(ctx)
 
+        # AdaptThink: 根据think_config调整max_tokens
+        base_tokens = 2048
+        think_cfg = getattr(ctx, 'think_config', {})
+        if think_cfg.get("think") and self.llm._is_reasoning:
+            base_tokens += think_cfg.get("budget", 0)
+
         for temp in self.temperatures:
-            raw = self.llm.generate(prompt=prompt, system=system, max_tokens=2048, temperature=temp)
+            raw = self.llm.generate(prompt=prompt, system=system, max_tokens=base_tokens, temperature=temp)
             modified = self._clean_code_output(raw)
             if modified and modified != original:
                 return modified
 
         logger.warning("Generator: all candidates identical to original or empty")
         return None
+
+    def _try_hashline(self, ctx: TaskContext, fpath: str, original: str,
+                      task_desc: str, search_ctx: str) -> Optional[str]:
+        """Try Hashline anchor-based editing. Returns modified code or None."""
+        try:
+            from kaiwu.tools.hashline import add_anchors, parse_anchor_edits, apply_anchor_edits
+        except ImportError:
+            return None
+
+        anchored = add_anchors(original)
+        prompt = HASHLINE_PROMPT.format(
+            task_description=task_desc,
+            file_path=fpath,
+            anchored_code=anchored,
+            search_context=search_ctx,
+        )
+        while "\n\n\n" in prompt:
+            prompt = prompt.replace("\n\n\n", "\n\n")
+
+        if ctx.retry_hint:
+            prompt += f"\n\n## 重试提示\n{ctx.retry_hint}"
+
+        system = self._build_system(ctx)
+        raw = self.llm.generate(prompt=prompt, system=system, max_tokens=1024, temperature=0.0)
+        if not raw or not raw.strip():
+            return None
+
+        edits = parse_anchor_edits(raw)
+        if not edits:
+            logger.debug("Hashline: no valid edit instructions parsed from: %s", raw[:200])
+            return None
+
+        modified, errors = apply_anchor_edits(original, edits)
+        if errors:
+            logger.debug("Hashline: edit rejected — %s", "; ".join(errors))
+            return None
+
+        if modified == original:
+            logger.debug("Hashline: edits produced no change")
+            return None
+
+        logger.info("Hashline: applied %d edits successfully", len(edits))
+        return modified
 
     def _build_retry_prompt(self, ctx: TaskContext, fpath: str, original: str,
                             task_desc: str, search_ctx: str) -> str:

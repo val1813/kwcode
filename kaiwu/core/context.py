@@ -79,3 +79,6 @@ class TaskContext:
 
     # 重试提示：按错误类型生成的指导，注入Generator prompt
     retry_hint: str = ""
+
+    # AdaptThink: think模式配置（orchestrator根据expert_type×difficulty设置）
+    think_config: dict = field(default_factory=lambda: {"think": False, "budget": 0})

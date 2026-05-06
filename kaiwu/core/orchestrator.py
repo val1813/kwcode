@@ -196,6 +196,11 @@ class PipelineOrchestrator:
             logger.info(f"[orchestrator] 任务包含 {len(image_paths)} 张图片")
 
         expert_type = gate_result.get("expert_type", "locator_repair")
+        difficulty = gate_result.get("difficulty", "medium")
+
+        # AdaptThink: 根据任务类型×难度设置think预算
+        from kaiwu.core.think_config import get_think_config
+        ctx.think_config = get_think_config(expert_type, difficulty)
 
         # 预搜索结果注入
         if pre_search_results:
@@ -372,6 +377,16 @@ class PipelineOrchestrator:
 
             # 设置重试策略：每次重试用不同方法
             ctx.retry_strategy = ctx.retry_count  # 0→1→2
+
+            # Fast/Slow双阶段：首次用fast(think=off)，失败后升级slow(think=on+高预算)
+            if ctx.retry_count == 1 and not ctx.think_config.get("think"):
+                # 第一次失败：从fast升级到slow think
+                ctx.think_config = {"think": True, "budget": 2048}
+                self._emit(on_status, "think_escalate", "升级到深度推理模式")
+            elif ctx.retry_count >= 2 and ctx.think_config.get("budget", 0) < 4096:
+                # 第二次失败：最大think预算
+                ctx.think_config = {"think": True, "budget": 4096}
+                self._emit(on_status, "think_escalate", "最大推理预算")
 
             # 错误驱动搜索：按失败类型决定是否搜索（网络保护：异常不阻塞）
             if self._should_search(current_error_type, ctx.retry_count) and not ctx.search_triggered and not no_search:

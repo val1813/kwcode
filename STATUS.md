@@ -53,6 +53,32 @@
 - orchestrator._record_success/_record_failure_result: 调_record_flywheel()
 - _record_flywheel(): 策略统计 + 用户模式 + 遥测，三路全非阻塞
 
+**P0: Hashline锚点编辑** (`tools/hashline.py`)
+- add_anchors(): 每行加6字符MD5哈希锚点 `行号|哈希| 内容`
+- parse_anchor_edits(): 解析 EDIT/DELETE/INSERT_AFTER 指令
+- apply_anchor_edits(): 验证哈希→应用编辑，任一哈希不匹配则拒绝全部
+- Generator首次尝试用HASHLINE_PROMPT（max_tokens=1024），失败fallback到完整函数生成
+- 效果：模型只输出编辑指令而非复现整个函数，减少输出token，消除patch_apply文本不匹配
+
+**P1: Think模式自适应** (`core/think_config.py`)
+- get_think_config(expert_type, difficulty) → {"think": bool, "budget": int}
+- 策略表：easy→think=off / medium→budget=512 / hard→budget=2048-4096
+- chat/office永远关闭think（不需要推理）
+- Generator根据think_config调整max_tokens：base + budget
+- orchestrator在Gate分类后自动设置ctx.think_config
+
+**P2: Fast/Slow双阶段推理**（融入orchestrator retry loop）
+- 第一次尝试：fast think（默认think=off，快速生成）
+- 第一次失败：升级到slow think（budget=2048）
+- 第二次失败：最大think预算（budget=4096）
+- 与现有retry_strategy(0→1→2)正交，think_budget独立递增
+- 对reasoning模型(QwQ-32B等)效果最明显
+
+**测试：21个新测试（P0-P2）**
+- Hashline: anchors/strip/parse/apply/mismatch/delete/insert/roundtrip (12)
+- ThinkConfig: easy/hard/chat/unknown/apply_tokens (8)
+- FastSlow: default/escalation (1)
+
 **Prompt约束量化改造（CC风格）**
 - GENERATOR_BASE_SYSTEM：定性→量化
   - "只做任务要求的事" → "每次patch只修改≤2个函数，修改行数≤30行"

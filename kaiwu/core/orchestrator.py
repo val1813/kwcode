@@ -309,9 +309,16 @@ class PipelineOrchestrator:
 
             if success:
                 elapsed = time.time() - start_time
-                return self._record_success(ctx, project_root, gate_result,
-                                            ab_candidate_name, ab_used_new, elapsed,
-                                            checkpoint, on_status)
+                result = self._record_success(ctx, project_root, gate_result,
+                                              ab_candidate_name, ab_used_new, elapsed,
+                                              checkpoint, on_status)
+                if result is not None:
+                    return result
+                # Reviewer审查不通过 → 当作失败，继续重试
+                self._emit(on_status, "review_retry", "审查不通过，重试修改...")
+                # Reset for retry（保留locator_output，只重新生成）
+                ctx.generator_output = None
+                ctx.verifier_output = None
 
             ctx.retry_count += 1
             error_detail = ""
@@ -348,7 +355,9 @@ class PipelineOrchestrator:
                 ctx._error_type_streak = {"type": current_error_type, "count": 1}
 
             # 快速熔断：语法错误重试无效
-            if current_error_type == "syntax" and ctx.retry_count >= 1:
+            # syntax熔断按tier区分：SMALL立刻熔断，MEDIUM/LARGE多给一次
+            _syntax_max = 1 if self._model_tier == ModelTier.SMALL else 2
+            if current_error_type == "syntax" and ctx.retry_count >= _syntax_max:
                 self._emit(on_status, "circuit_break", "语法错误重试无效，模型能力不足以完成此任务")
                 self.bus.emit("circuit_break", {"msg": "syntax error"})
                 break
@@ -585,10 +594,16 @@ class PipelineOrchestrator:
                         ab_candidate_name, ab_used_new: bool, elapsed: float,
                         checkpoint, on_status) -> dict:
         """Record success: memory, registry, trajectory, AB, value, milestone, reflection."""
-        checkpoint.discard()  # Clean up snapshot on success
-
-        # Reviewer: 需求对齐审查（非阻塞，不影响成功判定）
+        # Reviewer: 需求对齐审查 — 不对齐返回None让调用方重试
         review_result = self._do_review(ctx, on_status)
+        if review_result and not review_result.get("aligned") and review_result.get("confidence", 0) >= 0.6:
+            gap = review_result.get("gap", "")
+            self._emit(on_status, "review_reject", f"审查不通过：{gap}")
+            # 把gap作为retry_hint注入，让Generator下次修正
+            ctx.retry_hint = f"上次修改审查不通过：{gap}。请重新修改确保满足用户需求。"
+            return None  # 返回None信号给retry loop
+
+        checkpoint.discard()  # 审查通过才清理快照
 
         # 成功时保存记忆（含耗时，用于专家/模式追踪）
         self.memory.save(project_root, ctx, elapsed=elapsed)

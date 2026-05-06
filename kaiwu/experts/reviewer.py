@@ -21,21 +21,22 @@ from kaiwu.llm.llama_backend import LLMBackend
 
 logger = logging.getLogger(__name__)
 
-REVIEW_PROMPT = """你是代码审查专家。判断以下代码修改是否真正满足了用户的需求。
+REVIEW_PROMPT = """判断代码修改是否满足需求。
 
-## 用户需求
-{user_input}
+需求：{user_input}
 
-## 实际代码变更
+修改内容：
 {changes}
 
-## 判断标准
-1. 修改是否解决了用户描述的核心问题？
-2. 是否有遗漏（用户要求了但没做的）？
-3. 是否有多余（用户没要求但做了的，可能引入风险）？
+{test_context}
 
-## 输出格式（JSON，不要解释）
-{{"aligned": true/false, "confidence": 0.0-1.0, "gap": "如果不对齐，说明差距是什么（一句话）"}}"""
+判断：
+1. 核心问题是否解决？（对照需求逐条检查）
+2. 是否有遗漏？（需求要求了但没做的）
+3. 修改的文件和函数是否正确？（改错文件=完全不对齐）
+
+只输出JSON：
+{{"aligned": true/false, "confidence": 0.0-1.0, "gap": "差距（一句话）"}}"""
 
 
 class ReviewerExpert:
@@ -60,10 +61,17 @@ class ReviewerExpert:
             if not changes:
                 return {"aligned": True, "confidence": 0.0, "gap": ""}
 
+            # 测试上下文：让Reviewer看到测试期望
+            test_ctx = ""
+            initial_failure = getattr(ctx, 'initial_test_failure', '')
+            if initial_failure:
+                test_ctx = f"测试报错（修改前）：\n{initial_failure[:300]}"
+
             # LLM 审查
             prompt = REVIEW_PROMPT.format(
                 user_input=ctx.user_input[:200],
                 changes=changes[:800],
+                test_context=test_ctx,
             )
 
             response = self.llm.generate(

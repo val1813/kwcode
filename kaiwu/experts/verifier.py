@@ -228,6 +228,14 @@ class VerifierExpert:
         passed = syntax_ok
         if tests_total > 0:
             passed = passed and (tests_passed == tests_total)
+        elif syntax_ok and not test_error:
+            # tests_total=0且没有报错：检查是否有测试文件但没跑到
+            project_lang = _detect_project_language(ctx.project_root, self.tools)
+            test_files = self._find_test_files(ctx.project_root, project_lang)
+            if test_files:
+                # 有测试文件但跑了0个测试 → 不算通过
+                passed = False
+                test_error = f"发现{len(test_files)}个测试文件但测试未执行，请检查测试路径"
 
         if not passed:
             self._rollback(backups)

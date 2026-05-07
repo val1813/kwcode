@@ -217,6 +217,12 @@ class GeneratorExpert:
         if self._is_test_generation_task(ctx):
             return self._run_test_generation(ctx, files)
 
+        # ── whole_file scope: 存根实现，LLM返回完整文件 ──
+        if ctx.gap and hasattr(ctx.gap, 'gap_type'):
+            from kaiwu.core.gap_detector import GapType
+            if ctx.gap.gap_type in (GapType.NOT_IMPLEMENTED, GapType.STUB_RETURNS_NONE):
+                return self._run_whole_file(ctx, files)
+
         # For each file+function pair, extract original and generate modified
         # Deduplicate: only patch each (file, function) once
         patches = []
@@ -790,3 +796,59 @@ class GeneratorExpert:
         ]
         lower = user_input.lower()
         return any(kw in lower for kw in keywords)
+
+    def _run_whole_file(self, ctx: TaskContext, files: list[str]) -> Optional[dict]:
+        """whole_file scope：LLM返回完整文件内容，直接write_file，不走apply_patch。"""
+        patches = []
+        explanation_parts = []
+
+        for fpath in files[:3]:
+            if "test" in fpath.lower():
+                continue
+
+            # 读取当前文件内容
+            if self.tools:
+                content = self.tools.read_file(fpath)
+            else:
+                content = ctx.relevant_code_snippets.get(fpath, "")
+            if not content or content.startswith("[ERROR]"):
+                continue
+
+            # 构建whole_file prompt
+            prompt = (
+                f"任务：{ctx.user_input[:300]}\n\n"
+                f"当前文件 {fpath} 的内容：\n{content}\n\n"
+                f"输出完整的Python文件内容。\n"
+                f"从第一行import开始到最后一行。\n"
+                f"不要只输出函数，输出整个文件。\n"
+                f"不要输出markdown代码块标记。\n"
+                f"实现所有pass存根函数，保持已有实现不变。"
+            )
+
+            if ctx.retry_hint:
+                prompt += f"\n\n## 重试提示\n{ctx.retry_hint}"
+
+            system = self._build_system(ctx)
+
+            raw = self.llm.generate(prompt=prompt, system=system, max_tokens=4096, temperature=0.0)
+            code = self._clean_code_output(raw)
+            if not code or code == content:
+                continue
+
+            patches.append({
+                "file": fpath,
+                "content": code,
+                "write_mode": "whole_file",
+            })
+            explanation_parts.append(f"{fpath}:whole_file")
+
+        if not patches:
+            logger.warning("Generator: whole_file produced no output")
+            return None
+
+        result = {
+            "patches": patches,
+            "explanation": f"Modified: {', '.join(explanation_parts)}",
+        }
+        ctx.generator_output = result
+        return result

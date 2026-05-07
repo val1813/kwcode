@@ -165,10 +165,11 @@ class VerifierExpert:
 
             # whole_file模式：直接写入整个文件
             if patch.get("write_mode") == "whole_file":
+                content = patch.get("content", "") or patch.get("modified", "")
                 try:
                     os.makedirs(os.path.dirname(fpath) if os.path.dirname(fpath) else ".", exist_ok=True)
                     with open(fpath, "w", encoding="utf-8") as f:
-                        f.write(modified)
+                        f.write(content)
                     success = True
                 except Exception as e:
                     logger.error("whole_file write failed for %s: %s", fpath, e)

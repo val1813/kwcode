@@ -117,13 +117,24 @@ class GapDetector:
         return any(re.search(p, output) for p in patterns)
 
     def _is_stub_returns_none(self, output: str) -> bool:
-        """None相关错误通常来自pass存根。"""
-        return ('NoneType' in output and
+        """None相关错误通常来自pass存根。扩展检测：assert None == X 模式。"""
+        # 经典模式：NoneType + 操作错误
+        if ('NoneType' in output and
                 ('has no attribute' in output or
                  'is not iterable' in output or
                  'unsupported operand' in output or
                  'is not subscriptable' in output or
-                 'object is not callable' in output))
+                 'object is not callable' in output)):
+            return True
+        # 扩展模式：多个 assert None == X（pass函数返回None被直接断言）
+        none_asserts = len(re.findall(r'assert None ==', output))
+        if none_asserts >= 2:
+            return True
+        # 扩展模式：where None = func_name()（pytest输出格式）
+        none_calls = len(re.findall(r'where None = \w+\(', output))
+        if none_calls >= 2:
+            return True
+        return False
 
     def _all_passed(self, output: str) -> bool:
         patterns = [

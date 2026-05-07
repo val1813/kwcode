@@ -483,7 +483,7 @@ class VerifierExpert:
             else:
                 passed, total = self._parse_test_output(output, project_lang)
                 error = stderr.strip() or stdout.strip()
-                return passed, total, error[:500]
+                return passed, total, error[:2000]
 
         return 0, 0, ""
 

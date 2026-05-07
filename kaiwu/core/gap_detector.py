@@ -176,6 +176,9 @@ class GapDetector:
     def _build_not_implemented_gap(self, output: str, project_root: str) -> Gap:
         files = self._extract_error_files(output)
         functions = self._extract_function_names(output)
+        # files为空时扫描project_root下所有非测试py文件
+        if not files:
+            files = self._find_source_files(project_root)
         # AST存根扫描：找到所有pass函数，提供完整target_functions
         stub_functions = self._scan_stubs_in_files(files, project_root)
         if stub_functions:
@@ -189,6 +192,9 @@ class GapDetector:
     def _build_stub_none_gap(self, output: str, project_root: str) -> Gap:
         files = self._extract_error_files(output)
         functions = self._extract_function_names(output)
+        # files为空时扫描project_root下所有非测试py文件
+        if not files:
+            files = self._find_source_files(project_root)
         # AST存根扫描
         stub_functions = self._scan_stubs_in_files(files, project_root)
         if stub_functions:
@@ -254,6 +260,13 @@ class GapDetector:
                 'run', 'main', '__init__', 'execute'}
         result = [f for f in functions if f not in skip and not f.startswith('test_')]
         return list(set(result))[:5]
+
+    def _find_source_files(self, project_root: str) -> list[str]:
+        """扫描project_root下所有非测试py文件（浅层，不递归深目录）。"""
+        import glob as _glob
+        all_py = _glob.glob(os.path.join(project_root, "*.py"))
+        # 过滤测试文件
+        return [f for f in all_py if 'test' not in os.path.basename(f).lower()][:5]
 
     def _scan_stubs_in_files(self, files: list[str], project_root: str) -> list[str]:
         """AST扫描文件中的pass/raise NotImplementedError存根函数。"""

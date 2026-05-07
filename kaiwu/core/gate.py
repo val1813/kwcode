@@ -39,7 +39,7 @@ GATE_PROMPT_MINIMAL = """判断这个任务是"新建文件"还是"修改文件"
 任务：{user_input}"""
 
 VALID_EXPERT_TYPES = {"locator_repair", "codegen", "refactor", "doc", "office",
-                      "chat", "vision", "whole_file_impl", "dependency_fix"}
+                      "chat", "vision"}
 
 
 class Gate:

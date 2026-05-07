@@ -41,10 +41,10 @@ class Gap:
 
 # 确定性Gap类型到专家类型的映射
 GAP_TO_EXPERT_TYPE = {
-    GapType.NOT_IMPLEMENTED:   "whole_file_impl",
-    GapType.STUB_RETURNS_NONE: "whole_file_impl",
+    GapType.NOT_IMPLEMENTED:   "locator_repair",
+    GapType.STUB_RETURNS_NONE: "locator_repair",
     GapType.LOGIC_ERROR:       "locator_repair",
-    GapType.MISSING_DEP:       "dependency_fix",
+    GapType.MISSING_DEP:       "locator_repair",
     GapType.SYNTAX_STRUCTURAL: "locator_repair",
     GapType.MISSING_TOOLCHAIN: "env_fix",
     GapType.NO_TEST:           "codegen",

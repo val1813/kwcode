@@ -28,8 +28,6 @@ from kaiwu.experts.search_augmentor import SearchAugmentorExpert
 from kaiwu.experts.search_subagent import SearchSubagent
 from kaiwu.experts.office_handler import OfficeHandlerExpert
 from kaiwu.experts.chat_expert import ChatExpert
-from kaiwu.experts.whole_file_impl import WholeFileImplExpert
-from kaiwu.experts.dependency_fix import DependencyFixExpert
 from kaiwu.memory.kaiwu_md import KaiwuMemory
 from kaiwu.registry.expert_registry import ExpertRegistry
 from kaiwu.tools.executor import ToolExecutor
@@ -160,12 +158,6 @@ class PipelineOrchestrator:
         self._gap_detector = GapDetector()
         self._state_tracker = ExecutionStateTracker()
         self._env_prober = EnvProber()
-        try:
-            _llm = getattr(generator, 'llm', None)
-            self._whole_file_impl = WholeFileImplExpert(llm=_llm, tool_executor=tool_executor) if _llm else None
-        except Exception:
-            self._whole_file_impl = None
-        self._dep_fix = DependencyFixExpert(tool_executor=tool_executor)
 
     def run(
         self,
@@ -326,7 +318,7 @@ class PipelineOrchestrator:
 
         self._emit(on_status, "gate", f"任务类型：{expert_type} | 难度：{gate_result.get('difficulty', '?')} | 路由：{ctx.routing_source}")
 
-        # ── MoE专家选择：whole_file_impl / dependency_fix 直接路由 ──
+        # ── MoE专家选择（已移除独立Expert类，统一走pipeline） ──
         moe_expert = self._select_moe_expert(ctx, expert_type)
 
         # 经验回放 + 预搜索 + 计划生成（跳过已被MoE专家处理的场景）
@@ -532,7 +524,7 @@ class PipelineOrchestrator:
                 # 更新gap驱动下一轮
                 ctx.gap = new_gap
 
-            # env_changed处理（DependencyFixExpert返回）
+            # env_changed处理（EnvProber安装依赖后返回）
             if ctx.generator_output and ctx.generator_output.get("env_changed"):
                 ctx.gap = self._recompute_gap(ctx, project_root)
                 self._emit(on_status, "env_changed", "环境已变化，重新分析...")
@@ -1061,20 +1053,33 @@ class PipelineOrchestrator:
             logger.debug("Telemetry failed (non-blocking): %s", e)
 
     def _build_retry_hint(self, ctx: TaskContext, error_type: str) -> str:
-        """按错误类型生成重试提示，注入 Generator prompt。"""
+        """按错误类型生成重试提示，注入 Generator prompt。携带上次生成的代码。"""
         strategy = RETRY_STRATEGIES.get(error_type, RETRY_STRATEGIES["unknown"])
         template = strategy.get("hint", "")
         if not template:
-            return ""
-        v = ctx.verifier_output or {}
-        try:
-            return template.format(
-                error_file=v.get("error_file", ""),
-                error_line=v.get("error_line", 0),
-                error_message=v.get("error_message", ""),
-            )
-        except (KeyError, ValueError):
-            return template
+            hint = ""
+        else:
+            v = ctx.verifier_output or {}
+            try:
+                hint = template.format(
+                    error_file=v.get("error_file", ""),
+                    error_line=v.get("error_line", 0),
+                    error_message=v.get("error_message", ""),
+                )
+            except (KeyError, ValueError):
+                hint = template
+
+        # 携带上次生成的代码，让LLM看到自己的错误
+        last_code = ""
+        if ctx.generator_output:
+            patches = ctx.generator_output.get("patches", [])
+            if patches:
+                last_code = patches[0].get("modified", "")[:300]
+
+        if last_code:
+            hint += f"\n\n上次生成的代码（有问题）：\n{last_code}\n\n请不要重复同样的错误。"
+
+        return hint
 
     def _should_search(self, error_type: str, retry_count: int) -> bool:
         """按失败类型决定是否搜网络，不是统一在 retry>=2 时搜。"""
@@ -1118,29 +1123,10 @@ class PipelineOrchestrator:
 
     def _select_moe_expert(self, ctx: TaskContext, expert_type: str):
         """
-        MoE专家选择：根据gap确定性选择专门专家。
-        返回专家实例或None（走默认pipeline）。
-
-        注意：WholeFileImplExpert不再作为独立路径——
-        而是通过ctx.gap传递scope信息给Generator，
-        Generator根据gap_type动态解除函数数量限制。
-        DependencyFixExpert仍作为独立路径（不需要LLM）。
+        MoE专家选择：已移除独立Expert类。
+        依赖安装由EnvProber在Phase0处理，存根实现由Generator通过scope处理。
+        始终返回None，走默认pipeline。
         """
-        if not ctx.gap:
-            return None
-
-        # DependencyFixExpert：纯确定性安装，不需要LLM
-        can, conf = self._dep_fix.can_handle(ctx)
-        if can:
-            return self._dep_fix
-
-        # WholeFileImplExpert：只在Generator不可用时才走独立路径
-        # 正常情况下，Generator通过ctx.gap自动解除函数限制
-        if self._whole_file_impl and expert_type == "whole_file_impl":
-            can, conf = self._whole_file_impl.can_handle(ctx)
-            if can:
-                return self._whole_file_impl
-
         return None
 
     def _recompute_gap(self, ctx: TaskContext, project_root: str) -> Gap:

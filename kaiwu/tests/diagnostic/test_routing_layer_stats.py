@@ -32,14 +32,7 @@ ROUTING_SCENARIOS = [
         "desc": "NotImplementedError with high confidence",
         "user_input": "实现这个功能",
         "gap": Gap(GapType.NOT_IMPLEMENTED, 0.9, ["src/calc.py"], ["add"], "", ""),
-        "expected_expert": "whole_file_impl",
-        "expected_source": "gap_detector",
-    },
-    {
-        "desc": "Missing dependency with high confidence",
-        "user_input": "修复这个bug",
-        "gap": Gap(GapType.MISSING_DEP, 0.95, [], [], "No module named 'redis'", ""),
-        "expected_expert": "dependency_fix",
+        "expected_expert": "locator_repair",
         "expected_source": "gap_detector",
     },
     {
@@ -135,7 +128,7 @@ ROUTING_SCENARIOS = [
         "desc": "Stub returns None gap",
         "user_input": "修复这个问题",
         "gap": Gap(GapType.STUB_RETURNS_NONE, 0.85, ["config.py"], ["load"], "", ""),
-        "expected_expert": "whole_file_impl",
+        "expected_expert": "locator_repair",
         "expected_source": "gap_detector",
     },
 

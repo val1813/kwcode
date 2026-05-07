@@ -7,26 +7,43 @@
 
 ---
 
-## Current: v1.6.0 (2026-05-07)
+## Current: v1.6.1 (2026-05-07)
 
-514/514 tests green + 67个bench tasks + 63个专项诊断测试。
-MoE确定性架构改造：GapDetector + ExecutionStateTracker + EnvProber + 增强审计日志。
-Generator根据gap.scope动态解除函数限制（存根任务不再cap at 2）。
+513 tests green + 67个bench tasks + 62个专项诊断测试。
+架构收敛：删除WholeFileImplExpert/DependencyFixExpert，纯确定性机制驱动pipeline。
+Generator增强：upstream_constraints注入system prompt + retry_hint携带上次代码 + tier=small填空框架。
+
+### v1.6.1 — Architecture Convergence (ExpertDirective收敛)
+
+**核心变更：删除独立Expert类，统一走pipeline**
+
+- 删除 `experts/whole_file_impl.py`（238行）和 `experts/dependency_fix.py`（99行）
+- 存根实现：Generator通过ctx.gap自动解除函数限制（scope=whole_file），不需要独立Expert
+- 依赖安装：EnvProber在Phase0处理，不需要独立Expert
+- `_select_moe_expert()`始终返回None，所有任务走统一pipeline
+- GAP_TO_EXPERT_TYPE映射：NOT_IMPLEMENTED/STUB_RETURNS_NONE/MISSING_DEP → locator_repair
+- Gate VALID_EXPERT_TYPES移除whole_file_impl和dependency_fix
+
+**Generator增强**
+1. `_build_system()`注入upstream_constraints到system prompt（之前只在prompt层注入，system层缺失）
+2. `_build_retry_hint()`携带上次生成的代码前300字符，LLM能看到自己的错误避免重复
+3. tier=small分支增加填空式编写规范（函数签名不变/只替换函数体/每个TODO 3-5行）
+
+**测试同步更新**
+- test_stub_ratio_threshold.py：移除WholeFileImplExpert.can_handle()测试，改为验证GAP_TO_EXPERT_TYPE映射
+- test_routing_layer_stats.py：expected_expert从whole_file_impl/dependency_fix改为locator_repair
+
+**设计意图：bench结果可直接归因于GapDetector+scope+ExecutionStateTracker+EnvProber这套纯确定性机制，不被枚举专家类干扰判断。**
 
 ### v1.6.0 — MoE Deterministic Architecture
 
 **核心原则：LLM只做代码生成，所有路由/决策/状态判断全部确定性化。**
 
-**架构现状与下一步：**
-- 当前：GapType枚举 + WholeFileImplExpert/DependencyFixExpert（按业务场景的专家类，冗余）
-- Generator已能根据ctx.gap自动解除函数限制（正确路径已实现）
-- 下一步：收敛到ExpertDirective模式——删除业务专家类，GapDetector输出scope指令，Generator统一处理所有scope（whole_file/single_function/env_setup），新场景只更新SKILL.md不加Python类
-
 **GapDetector** (`core/gap_detector.py`)
 - GapType enum（11种）：NONE/NOT_IMPLEMENTED/STUB_RETURNS_NONE/LOGIC_ERROR/MISSING_DEP/SYNTAX_STRUCTURAL/MISSING_TOOLCHAIN/WRONG_FILE/NO_TEST/ENVIRONMENT/UNKNOWN
 - Gap dataclass：gap_type + confidence + files + functions + error_msg + suggestion
 - GapDetector.compute()：纯正则匹配，零LLM调用，按优先级分类
-- GAP_TO_EXPERT_TYPE：确定性映射 GapType → expert_type
+- GAP_TO_EXPERT_TYPE：确定性映射 GapType → expert_type（v1.6.1统一为locator_repair）
 
 **ExecutionStateTracker** (`core/execution_state.py`)
 - TestDelta dataclass：每次修改后的测试状态变化
@@ -40,17 +57,9 @@ Generator根据gap.scope动态解除函数限制（存根任务不再cap at 2）
 - 缓存.kaiwu/env_profile.json（24h TTL，只缓存成功）
 - _find_working_test_cmd()：go用build验证（spec v2修正）
 
-**WholeFileImplExpert** (`experts/whole_file_impl.py`)
-- 处理存根实现任务（pass/raise NotImplementedError → 真实实现）
-- can_handle()：gap为NOT_IMPLEMENTED/STUB_RETURNS_NONE时True
-- AST提取所有pass存根，LLM生成完整文件（max_tokens=4096）
-- write_mode="whole_file"：直接写入整个文件
+**WholeFileImplExpert** — 已删除（v1.6.1），功能由Generator通过ctx.gap scope=whole_file处理
 
-**DependencyFixExpert** (`experts/dependency_fix.py`)
-- 确定性依赖安装，零LLM调用
-- 只匹配`No module named 'xxx'`（v2修正：不匹配from 'yyy'）
-- PyPI名映射（cv2→opencv-python, PIL→Pillow等）
-- 返回env_changed标记，orchestrator重新计算gap
+**DependencyFixExpert** — 已删除（v1.6.1），功能由EnvProber在Phase0处理
 
 **Gate重构** (`core/gate.py`)
 - 确定性优先路由，LLM只做最后兜底二分类
@@ -63,7 +72,7 @@ Generator根据gap.scope动态解除函数限制（存根任务不再cap at 2）
 - Phase 1：无条件pre_test → GapDetector → ExecutionStateTracker.set_baseline()
 - Phase 2：Gap驱动expert_type覆盖（确定性优先于LLM分类）
 - Retry loop增强：回归检测→checkpoint.restore() / env_changed→_recompute_gap()
-- _select_moe_expert()：确定性选择WholeFileImpl/DependencyFix
+- _select_moe_expert()：v1.6.1起始终返回None（统一走pipeline）
 
 **Verifier增强** (`experts/verifier.py`)
 - whole_file write_mode支持（直接写入整个文件）
@@ -85,9 +94,9 @@ Generator根据gap.scope动态解除函数限制（存根任务不再cap at 2）
 - confirmed_test_cmd: EnvProber提供的已验证测试命令
 - routing_source: 路由来源审计字段
 
-**专项诊断测试** (`tests/diagnostic/`, 63个测试)
+**专项诊断测试** (`tests/diagnostic/`, 62个测试)
 - test_gap_detector_accuracy.py：20个手工样本，GapType分类准确率>90%
-- test_stub_ratio_threshold.py：10+10文件，路由准确率>85%
+- test_stub_ratio_threshold.py：10+10文件，stub_ratio阈值验证>85% + GAP映射验证
 - test_execution_tracker_value.py：5个多迭代场景，回归检测+最优中间状态
 - test_routing_layer_stats.py：三层消噪触发率验证，gap_detector>llm_fallback
 
@@ -356,8 +365,8 @@ Theory: RIG + FastCode + CodeCompass
 | Multi-language | 51 | PASS |
 | Server/TUI | 16 | PASS |
 | SearchSubagent+Manifest | 27 | PASS |
-| MoE Diagnostic | 63 | PASS |
-| **Total** | **514** | **All green** |
+| MoE Diagnostic | 62 | PASS |
+| **Total** | **513** | **All green** |
 
 ---
 
@@ -401,10 +410,8 @@ kwcode/
     ├── experts/
     │   ├── locator.py           # BM25+graph location + DocReader + Prefetch
     │   ├── search_subagent.py   # [v1.5] Isolated search (independent context)
-    │   ├── generator.py         # Code generation (original from file, LLM writes modified)
+    │   ├── generator.py         # [v1.6.1] Code generation + upstream_constraints system + retry last_code + small填空
     │   ├── verifier.py          # [v1.6] Syntax + pytest + whole_file + _detect_wrong_file
-    │   ├── whole_file_impl.py   # [v1.6] Stub implementation (pass→real, write_mode=whole_file)
-    │   ├── dependency_fix.py    # [v1.6] Deterministic dep install (zero LLM)
     │   ├── search_augmentor.py  # Search augmentation + BM25 rerank
     │   ├── consistency_checker.py # Frontend/backend API consistency (deterministic)
     │   ├── chat_expert.py       # Chat (search gating)
@@ -423,7 +430,7 @@ kwcode/
     ├── llm/                     # Ollama + llama.cpp backends
     ├── tools/                   # 5 deterministic tools + ToolGateway
     ├── audit/                   # [v1.6] Enhanced audit (success/failed split, iterations)
-    └── tests/                   # 514 unit tests + 67 bench tasks + 63 diagnostic
+    └── tests/                   # 513 unit tests + 67 bench tasks + 62 diagnostic
         └── diagnostic/          # [v1.6] 4 architecture validation test suites
 ```
 
@@ -435,10 +442,12 @@ kwcode/
 2. ~~注释统一中文~~ ✅ v1.5.0
 3. ~~专家细粒度EventBus emit~~ ✅ v1.5.0
 4. ~~bench tasks多语言覆盖（67题 Python/Go/TS）~~ ✅ v1.5.0
-5. SQLite跨session查询
-6. pip publish到PyPI（v1.5.0）
-7. install.ps1 / install.sh一键安装
-8. SWE-bench评测（用评测VPS跑）
+5. ~~删除WholeFileImplExpert/DependencyFixExpert，收敛到纯pipeline~~ ✅ v1.6.1
+6. SQLite跨session查询
+7. pip publish到PyPI（v1.5.0）
+8. install.ps1 / install.sh一键安装
+9. SWE-bench评测（用评测VPS跑）
+10. **跑bench验证v1.6.1架构收敛效果**
 
 ## Known Issues
 

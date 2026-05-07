@@ -1,6 +1,6 @@
 """
 专项2：stub_ratio阈值验证测试集
-目标：找到stub_ratio的最优阈值，验证WholeFileImplExpert路由准确性
+目标：找到stub_ratio的最优阈值，验证存根检测路由准确性
 成功标准：路由准确率 > 85%
 """
 
@@ -9,12 +9,11 @@ import os
 import tempfile
 import pytest
 from kaiwu.core.gap_detector import GapDetector, GapType, Gap
-from kaiwu.experts.whole_file_impl import WholeFileImplExpert
 from kaiwu.core.context import TaskContext
 
 
 # ══════════════════════════════════════
-# 存根文件样本（应路由到 whole_file_impl）
+# 存根文件样本（高stub_ratio → scope=whole_file）
 # ══════════════════════════════════════
 
 STUB_FILES = [
@@ -274,9 +273,9 @@ class TestStubRatioThreshold:
     @pytest.mark.parametrize("filename,content,expected,desc", STUB_FILES,
                              ids=[s[3] for s in STUB_FILES])
     def test_stub_files_detected(self, filename, content, expected, desc):
-        """存根文件应该被检测为whole_file_impl。"""
+        """存根文件应该被检测为whole_file scope。"""
         ratio = self._compute_stub_ratio(content)
-        # 阈值0.5：超过50%的函数是存根 → whole_file_impl
+        # 阈值0.5：超过50%的函数是存根 → whole_file scope
         detected = "whole_file_impl" if ratio >= 0.5 else "locator_repair"
         assert detected == expected, (
             f"[{desc}] stub_ratio={ratio:.2f}, "
@@ -286,7 +285,7 @@ class TestStubRatioThreshold:
     @pytest.mark.parametrize("filename,content,expected,desc", BUG_FIX_FILES,
                              ids=[s[3] for s in BUG_FIX_FILES])
     def test_bugfix_files_not_stub(self, filename, content, expected, desc):
-        """Bug修复文件不应该被路由到whole_file_impl。"""
+        """Bug修复文件不应该被路由到whole_file scope。"""
         ratio = self._compute_stub_ratio(content)
         detected = "whole_file_impl" if ratio >= 0.5 else "locator_repair"
         assert detected == expected, (
@@ -315,28 +314,8 @@ class TestStubRatioThreshold:
             f"失败样本：\n" + "\n".join(failures)
         )
 
-    def test_can_handle_with_gap(self):
-        """验证WholeFileImplExpert.can_handle()与gap配合。"""
-        expert = WholeFileImplExpert.__new__(WholeFileImplExpert)
-
-        # NOT_IMPLEMENTED gap → can_handle = True
-        ctx = TaskContext()
-        ctx.gap = Gap(GapType.NOT_IMPLEMENTED, 0.9, [], [], "", "")
-        can, conf = expert.can_handle(ctx)
-        assert can is True
-        assert conf >= 0.8
-
-        # STUB_RETURNS_NONE gap → can_handle = True
-        ctx.gap = Gap(GapType.STUB_RETURNS_NONE, 0.85, [], [], "", "")
-        can, conf = expert.can_handle(ctx)
-        assert can is True
-
-        # LOGIC_ERROR gap → can_handle = False
-        ctx.gap = Gap(GapType.LOGIC_ERROR, 0.8, [], [], "", "")
-        can, conf = expert.can_handle(ctx)
-        assert can is False
-
-        # No gap → can_handle = False
-        ctx.gap = None
-        can, conf = expert.can_handle(ctx)
-        assert can is False
+    def test_gap_type_maps_to_locator_repair(self):
+        """验证NOT_IMPLEMENTED/STUB_RETURNS_NONE现在映射到locator_repair（由Generator通过scope处理）。"""
+        from kaiwu.core.gap_detector import GAP_TO_EXPERT_TYPE
+        assert GAP_TO_EXPERT_TYPE[GapType.NOT_IMPLEMENTED] == "locator_repair"
+        assert GAP_TO_EXPERT_TYPE[GapType.STUB_RETURNS_NONE] == "locator_repair"

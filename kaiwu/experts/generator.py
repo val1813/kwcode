@@ -322,6 +322,11 @@ class GeneratorExpert:
                 "- class内方法必须保持原有缩进（通常4空格）\n"
                 "- 禁止输出markdown代码块标记（```）\n"
                 "- 禁止输出write_file、read_file等命令文本\n"
+                "\n## 编写规范（严格遵守）\n"
+                "生成代码时使用以下框架，只填写TODO部分：\n"
+                "- 函数签名保持原样不变\n"
+                "- 只替换函数体，不改其他\n"
+                "- 每个TODO只写3-5行，超过就分解\n"
             )
         elif tier == "large":
             # 大模型：保留工具描述但明确自动调用
@@ -337,6 +342,11 @@ class GeneratorExpert:
                 "\n\n## 工具说明\n"
                 "- 工具由系统自动调用，你只需输出修改后的代码，不要输出工具调用命令\n"
             )
+
+        # Inject upstream constraints into system prompt
+        upstream = getattr(ctx, 'upstream_constraints', '')
+        if upstream:
+            system += f"\n\n## 跨文件约束（必须遵守）\n{upstream}"
 
         # Append web design rules for HTML/CSS/web tasks
         if self._is_web_task(ctx.user_input):

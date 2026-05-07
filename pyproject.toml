@@ -8,7 +8,7 @@ version = "1.6.0"
 description = "KwCode - Local-model coding agent with MoE expert pipeline"
 requires-python = ">=3.10"
 readme = "README.md"
-license = {text = "MIT"}
+license = {text = "Apache-2.0"}
 keywords = ["coding-agent", "local-llm", "ollama", "code-generation"]
 classifiers = [
     "Development Status :: 4 - Beta",

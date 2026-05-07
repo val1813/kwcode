@@ -7,10 +7,49 @@
 
 ---
 
-## Current: v1.6.2 (2026-05-07)
+## Current: v1.7.0 (2026-05-07)
 
 513 tests green + 67个bench tasks + 62个专项诊断测试。
-执行反馈深度升级：结构化测试失败解析 + TraceCoder历史教训累积 + whole_file写入修复 + 完整审计日志。
+KAIJU架构借鉴：Generator bounded context + 存根任务sub-task decomposition + DetailedLogger完整流水线日志。
+
+### v1.7.0 — KAIJU Architecture Adoption
+
+**核心理念：借鉴KAIJU三个具体机制，提升Generator精度和可观测性。**
+
+**Generator Bounded Context**（改动1）
+- `_generate_modified()`不再注入全部structured_failures和完整retry历史
+- 新增`_filter_relevant_failures()`：按函数名/文件名筛选，只传与当前函数相关的测试失败
+- 新增`_extract_func_name_from_code()`：从代码片段提取函数名用于筛选
+- retry_hint截断到300字符，不传完整历史文本
+- 效果：LLM每次只看它需要的信息，不被无关失败干扰
+
+**Sub-task Decomposition for Stub Tasks**（改动2）
+- 新增`_run_stub_decomposed()`：GapDetector识别stub_returns_none时，逐函数独立实现
+- 新增`_find_stub_functions()`：精确检测pass/.../ return None/raise NotImplementedError存根
+- 每个函数独立LLM调用、独立bounded context（只有该函数代码+相关测试）
+- 一个函数失败不影响其他函数
+- 3+个stub函数时触发decomposition，≤2个仍走whole_file（更简单）
+- fallback：decomposition全失败时退回_run_whole_file
+
+**DetailedLogger完整流水线日志**（`audit/detailed_logger.py`）
+- 每个任务生成独立JSON到`logs/`目录，文件名`YYYY-MM-DD_HHMMSS_<expert_type>.json`
+- LLM完整prompt/output不截断记录（区别于AuditLogger的500字符截断）
+- 三种timeline entry类型：
+  - `llm_call`：caller/messages/prompt/system/output/tokens/elapsed_ms
+  - `node_io`：stage/input/output（gate/locator/generator/verifier各节点）
+  - `decision`：stage/decision/reason/context（重试策略/熔断/搜索触发）
+- 环境变量`KWCODE_DETAIL_LOG_DIR`可配置输出目录，设空禁用
+- 非阻塞：所有写入try/except包裹，失败不影响主流程
+
+**LLM Backend on_call钩子**（`llm/llama_backend.py`）
+- `_on_llm_call`回调属性：orchestrator设置后，每次generate()/chat()自动触发
+- 记录完整messages和response到DetailedLogger
+- 安全：getattr检查，Mock对象不会报错
+
+**OpenAI兼容API检测修复**
+- `_detect_openai_compat()`：localhost非标准端口（如kaiwu部署器11435）通过探测`/api/tags`判断
+- 探测到`/api/tags`返回models → Ollama，否则 → OpenAI兼容
+- 修复：kaiwu部署器不再错误走`/api/chat`导致404
 
 ### v1.6.2 — Execution Feedback Depth Upgrade
 
@@ -421,7 +460,7 @@ kwcode/
     ├── experts/
     │   ├── locator.py           # BM25+graph location + DocReader + Prefetch
     │   ├── search_subagent.py   # [v1.5] Isolated search (independent context)
-    │   ├── generator.py         # [v1.6.1] Code generation + upstream_constraints system + retry last_code + small填空
+    │   ├── generator.py         # [v1.7] Bounded context + stub decomposition + upstream_constraints
     │   ├── verifier.py          # [v1.6] Syntax + pytest + whole_file + _detect_wrong_file
     │   ├── search_augmentor.py  # Search augmentation + BM25 rerank
     │   ├── consistency_checker.py # Frontend/backend API consistency (deterministic)
@@ -440,7 +479,7 @@ kwcode/
     ├── mcp/                     # MCP Router
     ├── llm/                     # Ollama + llama.cpp backends
     ├── tools/                   # 5 deterministic tools + ToolGateway
-    ├── audit/                   # [v1.6] Enhanced audit (success/failed split, iterations)
+    ├── audit/                   # [v1.7] DetailedLogger + Enhanced audit (success/failed split)
     └── tests/                   # 513 unit tests + 67 bench tasks + 62 diagnostic
         └── diagnostic/          # [v1.6] 4 architecture validation test suites
 ```

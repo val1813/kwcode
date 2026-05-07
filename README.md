@@ -10,13 +10,13 @@
 [![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://python.org)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Mac%20%7C%20Linux-lightgrey.svg)]()
 [![Multi-Platform Tests](https://github.com/val1813/kwcode/actions/workflows/test.yml/badge.svg)](https://github.com/val1813/kwcode/actions/workflows/test.yml)
-[![Version](https://img.shields.io/badge/Version-1.6.1-blue.svg)]()
+[![Version](https://img.shields.io/badge/Version-1.6.2-blue.svg)]()
 
 </div>
 
 ---
 
-> **v1.6.1 已发布！** 架构收敛：删除冗余Expert类，纯确定性机制驱动pipeline。安装命令：
+> **v1.6.2 已发布！** 执行反馈深度升级：结构化测试失败解析 + TraceCoder历史教训累积 + whole_file写入修复。安装命令：
 >
 > ```bash
 > pip install kwcode
@@ -30,6 +30,7 @@
 
 | 日期 | 内容 |
 |------|------|
+| 05-07 | **v1.6.2** 执行反馈深度升级：结构化测试失败解析(parse_test_failures) + TraceCoder历史教训累积(attempt_history) + whole_file写入修复(存根任务不再patches=0) + 完整审计日志(llm_calls/node_io) + pytest -v详细输出 |
 | 05-07 | **v1.6.1** 架构收敛：删除WholeFileImplExpert/DependencyFixExpert，纯确定性机制驱动pipeline。Generator增强(upstream_constraints注入system prompt + retry_hint携带上次代码 + tier=small填空框架)。License改为Apache-2.0。513 tests green |
 | 05-07 | **v1.6.0** MoE确定性架构：GapDetector(11种GapType,零LLM) + ExecutionStateTracker(回归检测) + EnvProber(工具链/依赖自动修复) + Gate确定性优先路由 + 63个专项诊断测试 |
 | 05-06 | **v1.5.1** Hashline锚点编辑(61%输出token减少) + AdaptThink自适应推理(easy→off/hard→4096) + Fast/Slow双阶段(首次fast失败升级slow) + 三飞轮(策略统计/用户模式/SKILL提炼) + 匿名遥测(opt-in, HMAC防护) + 审计日志(`kwcode log`) + model命令 + model_capability全量接入(tier检测→ctx自适应→prompt约束) + 缩进对齐修复 |
@@ -357,7 +358,7 @@ export KWCODE_VISION_MODEL="your-multimodal-model"
 | /plan 风险评估 | ✅ | ❌ | ✅ |
 | Checkpoint 回滚 | ✅ | ❌ | ✅ |
 | 价值量化仪表盘 | ❌ | ❌ | ✅ 独有 |
-| 开源 | ❌ | ✅ MIT | ✅ MIT |
+| 开源 | ❌ | ✅ MIT | ✅ Apache-2.0 |
 
 ---
 
@@ -714,4 +715,4 @@ python -m pytest kaiwu/tests/ -v --ignore=kaiwu/tests/bench_tasks
 
 ## License
 
-MIT
+Apache-2.0

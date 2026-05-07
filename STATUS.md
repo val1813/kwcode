@@ -7,11 +7,23 @@
 
 ---
 
-## Current: v1.6.1 (2026-05-07)
+## Current: v1.6.2 (2026-05-07)
 
 513 tests green + 67个bench tasks + 62个专项诊断测试。
-架构收敛：删除WholeFileImplExpert/DependencyFixExpert，纯确定性机制驱动pipeline。
-Generator增强：upstream_constraints注入system prompt + retry_hint携带上次代码 + tier=small填空框架。
+执行反馈深度升级：结构化测试失败解析 + TraceCoder历史教训累积 + whole_file写入修复 + 完整审计日志。
+
+### v1.6.2 — Execution Feedback Depth Upgrade
+
+**核心理念：不是修retry机制，是升级执行反馈的质量。**
+
+- `parse_test_failures()`: 从pytest输出提取每个失败测试的expected/actual/error_type/snippet
+- TraceCoder `attempt_history`: 每轮累积不重置，retry_hint携带最近3次历史摘要
+- 完整审计日志: `llm_calls`记录每次LLM调用prompt/output，`node_io`记录各节点IO
+- pytest从-q改为-v: 获取完整失败详情
+- 存根检测扩展: TypeError/takes no arguments/多个TypeError
+- codegen路径文件已存在时走whole_file覆盖（不再生成_1.py）
+- 逐函数patch全失败时fallback到whole_file（保证patches不为0）
+- Reviewer在tests全通过时跳过（防LLM幻觉reject）
 
 ### v1.6.1 — Architecture Convergence (ExpertDirective收敛)
 

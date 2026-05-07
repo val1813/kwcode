@@ -6,25 +6,32 @@ All notable changes to KWCode are documented here.
 
 ## [1.6.2] - 2026-05-07
 
-### Retry优化 + 润滑/免疫机制
+### 执行反馈深度升级 + 存根任务修复
 
-**核心理念**：让LLM在擅长的地方发挥最大效能，在不擅长的地方不让它发力。给最好的原材料，而不是更多的retry机制。
-
-### Changed
-
-- **Generator首次生成注入initial_test_failure**：LLM第一次就能看到具体哪些测试在失败、期望什么输出，不再盲目生成
-- **retry_hint携带具体失败测试名**：从verifier_output提取failed_tests列表注入hint，LLM重试时精确知道哪些测试还没过
-- **Reviewer在tests_total==0时跳过**：无测试证据时Reviewer会幻觉reject，现在直接放行
-- **think_escalate改为条件触发**：只在assertion错误（逻辑错误）时升级深度推理，syntax/patch_apply等错误想更久没用
-- **MISSING_TOOLCHAIN快速熔断**：工具链缺失时直接返回失败告知用户，不浪费retry
-
-### Removed
-
-- **scope narrowing**：删除第2次失败时缩小到第一个文件+函数的逻辑。第一次定位错了缩小只会更错，让Locator自然重新搜索
+**核心理念**：不是修retry机制，是升级执行反馈的质量。给LLM最精确的失败信息，让它知道具体哪里错了。
 
 ### Added
 
-- **WinkMonitor免疫机制**：新增`tests_no_progress` pattern，检测连续retry后通过率未提升，注入"换方向"纠正hint
+- **parse_test_failures()结构化解析**：从pytest输出提取每个失败测试的test_name/expected/actual/error_type/file/line/snippet
+- **TraceCoder历史教训累积**：attempt_history每轮累积不重置，retry_hint携带最近3次历史摘要（20+20=40效果）
+- **完整审计日志**：llm_calls记录每次LLM调用的prompt/output，node_io记录各节点输入输出，便于快速定位问题出在哪一层
+- **WinkMonitor免疫机制**：tests_no_progress/repetitive_fix pattern检测
+
+### Changed
+
+- **Generator首次生成注入structured_failures**：不只是raw output，而是"test_guard_allows: 期望True，实际None"这样的精确信息
+- **pytest从-q改为-v**：获取完整失败详情而非摘要
+- **pre_test输出截断从500→2000字符**：保证assert None==模式不被截掉
+- **Reviewer在tests全通过时跳过**：防止LLM幻觉reject正确结果
+- **存根检测扩展**：覆盖TypeError/takes no arguments/多个TypeError模式
+- **codegen路径文件已存在时走whole_file覆盖**：不再生成_1.py导致测试跑错文件
+- **逐函数patch全失败时fallback到whole_file**：保证patches不为0
+
+### Fixed
+
+- **hashline \\n字面量问题**：LLM把多行代码塞进一行导致语法错误
+- **Gap检测files为空时扫描project_root**：pre_test输出只含test文件路径时也能找到源文件存根
+- **回归rollback携带具体信息**：不是空白"请只修改必要部分"，而是具体哪些测试新失败了
 
 ---
 

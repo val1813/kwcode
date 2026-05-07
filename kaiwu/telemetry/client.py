@@ -26,7 +26,7 @@ try:
     from importlib.metadata import version as _pkg_version
     VERSION = _pkg_version("kwcode")
 except Exception:
-    VERSION = "1.6.1"
+    VERSION = "1.6.2"
 _HMAC_SECRET = b"kwcode-telemetry-2026-v1"
 
 

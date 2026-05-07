@@ -98,3 +98,12 @@ class TaskContext:
 
     # 路由来源（用于审计）："gap_detector"/"file_signal"/"keyword"/"llm_fallback"
     routing_source: str = ""
+
+    # ── TraceCoder式轨迹记录（每轮累积，不重置） ──
+    # 历史教训：每次retry的结构化记录，带入下一轮
+    attempt_history: list = field(default_factory=list)
+    # shape: [{"attempt": 1, "passed_tests": [...], "failed_tests": [...],
+    #          "error_type": "...", "patch_summary": "...", "lesson": "..."}]
+
+    # 错误类型连续计数（用于熔断）
+    _error_type_streak: dict = field(default_factory=lambda: {"type": "", "count": 0})

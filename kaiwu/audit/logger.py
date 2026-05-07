@@ -138,6 +138,8 @@ class AuditLogger:
                 "initial_gap_type": initial_gap_type,
                 "iterations": self._iterations,
                 "events": self._events,
+                # TraceCoder: 完整历史教训链
+                "attempt_history": getattr(ctx, 'attempt_history', []),
             }
 
             log_path = log_dir / filename

@@ -417,6 +417,17 @@ class PipelineOrchestrator:
             else:
                 ctx._error_type_streak = {"type": current_error_type, "count": 1}
 
+            # ── TraceCoder: 累积历史教训（不重置） ──
+            attempt_record = {
+                "attempt": ctx.retry_count,
+                "error_type": current_error_type,
+                "passed_tests": extract_passing_tests(error_detail) if error_detail else [],
+                "failed_tests": (ctx.verifier_output or {}).get("failed_tests", []),
+                "patch_files": [p.get("file", "") for p in (ctx.generator_output or {}).get("patches", [])],
+                "error_message": (ctx.verifier_output or {}).get("error_message", "")[:200],
+            }
+            ctx.attempt_history.append(attempt_record)
+
             # 快速熔断：语法错误重试无效
             # syntax熔断按tier区分：SMALL立刻熔断，MEDIUM/LARGE多给一次
             _syntax_max = 1 if self._model_tier == ModelTier.SMALL else 2
@@ -512,7 +523,12 @@ class PipelineOrchestrator:
                                f"第{ctx.retry_count}次修改引入了回归，回滚...")
                     if checkpoint_saved:
                         checkpoint.restore()
-                    ctx.retry_hint = "上次修改引入了回归，请只修改必要的部分"
+                    # TraceCoder: 回归时携带具体信息，不是空白重试
+                    regressed_tests = self._state_tracker.get_new_failures() if hasattr(self._state_tracker, 'get_new_failures') else []
+                    ctx.retry_hint = (
+                        f"上次修改引入了回归（新增失败：{', '.join(regressed_tests[:3]) if regressed_tests else '未知'}）。\n"
+                        f"请保留已通过测试的修复，只修改导致回归的部分。"
+                    )
 
                 # 更新gap驱动下一轮
                 ctx.gap = new_gap
@@ -1074,7 +1090,8 @@ class PipelineOrchestrator:
         if ctx.generator_output:
             patches = ctx.generator_output.get("patches", [])
             if patches:
-                last_code = patches[0].get("modified", "")[:300]
+                last_code = patches[0].get("modified", "") or patches[0].get("content", "")
+                last_code = last_code[:300]
 
         if last_code:
             hint += f"\n\n上次生成的代码（有问题）：\n{last_code}\n\n请不要重复同样的错误。"
@@ -1083,6 +1100,21 @@ class PipelineOrchestrator:
         failed_tests = (ctx.verifier_output or {}).get("failed_tests", [])
         if failed_tests:
             hint += "\n\n仍然失败的测试：\n" + "\n".join(f"  - {t}" for t in failed_tests[:5])
+
+        # TraceCoder: 携带历史教训摘要（20+20=40效果）
+        if ctx.attempt_history:
+            lessons = []
+            for rec in ctx.attempt_history[-3:]:  # 最近3次
+                passed = rec.get("passed_tests", [])
+                failed = rec.get("failed_tests", [])
+                err = rec.get("error_message", "")
+                if passed or failed or err:
+                    lessons.append(
+                        f"第{rec['attempt']}次：通过{len(passed)}个/失败{len(failed)}个"
+                        f"{' | 错误：' + err[:80] if err else ''}"
+                    )
+            if lessons:
+                hint += "\n\n## 历史尝试记录（避免重复错误）\n" + "\n".join(lessons)
 
         return hint
 

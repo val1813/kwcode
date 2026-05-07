@@ -6,17 +6,17 @@
 
 *数据不出网 · Windows 打开就能用 · 越用越懂你的项目*
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-green.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://python.org)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Mac%20%7C%20Linux-lightgrey.svg)]()
 [![Multi-Platform Tests](https://github.com/val1813/kwcode/actions/workflows/test.yml/badge.svg)](https://github.com/val1813/kwcode/actions/workflows/test.yml)
-[![Version](https://img.shields.io/badge/Version-1.5.1-blue.svg)]()
+[![Version](https://img.shields.io/badge/Version-1.6.1-blue.svg)]()
 
 </div>
 
 ---
 
-> **v1.5.1 已发布！** 新增：Hashline锚点编辑 + 模型自适应(ctx/prompt/think) + 三飞轮 + 审计日志。安装命令：
+> **v1.6.1 已发布！** 架构收敛：删除冗余Expert类，纯确定性机制驱动pipeline。安装命令：
 >
 > ```bash
 > pip install kwcode
@@ -30,6 +30,8 @@
 
 | 日期 | 内容 |
 |------|------|
+| 05-07 | **v1.6.1** 架构收敛：删除WholeFileImplExpert/DependencyFixExpert，纯确定性机制驱动pipeline。Generator增强(upstream_constraints注入system prompt + retry_hint携带上次代码 + tier=small填空框架)。License改为Apache-2.0。513 tests green |
+| 05-07 | **v1.6.0** MoE确定性架构：GapDetector(11种GapType,零LLM) + ExecutionStateTracker(回归检测) + EnvProber(工具链/依赖自动修复) + Gate确定性优先路由 + 63个专项诊断测试 |
 | 05-06 | **v1.5.1** Hashline锚点编辑(61%输出token减少) + AdaptThink自适应推理(easy→off/hard→4096) + Fast/Slow双阶段(首次fast失败升级slow) + 三飞轮(策略统计/用户模式/SKILL提炼) + 匿名遥测(opt-in, HMAC防护) + 审计日志(`kwcode log`) + model命令 + model_capability全量接入(tier检测→ctx自适应→prompt约束) + 缩进对齐修复 |
 | 05-06 | **v1.5.0** SearchSubagent隔离搜索(独立context窗口+并行读取) + UpstreamManifest跨文件契约(AST提取签名/常量，零LLM) + PENCIL式context压缩 + Verifier跨文件一致性检查 + orchestrator run()拆分(410→253行) + CLI拆分(1861→173行) + ruff/mypy配置 |
 | 05-06 | **v1.4.0** 多语言AST支持(Go/TS/Rust/Java + ast-grep预定义模板) + FastAPI Server(SSE端口7355) + Textual TUI(`kwcode --tui`) + VSCode插件(薄客户端) + 多语言Verifier(jest/go test/cargo test/mvn test) |

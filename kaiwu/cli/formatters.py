@@ -94,7 +94,7 @@ try:
     from importlib.metadata import version as _pkg_version
     VERSION = _pkg_version("kwcode")
 except Exception:
-    VERSION = "1.5.1"
+    VERSION = "1.6.1"
 
 # ── Shadow/重影大字 KAIWU ──
 _KAIWU_SHADOW = [

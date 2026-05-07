@@ -2,4 +2,4 @@ try:
     from importlib.metadata import version as _pkg_version
     __version__ = _pkg_version("kwcode")
 except Exception:
-    __version__ = "1.5.1"
+    __version__ = "1.6.1"

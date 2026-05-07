@@ -9,7 +9,7 @@ try:
     from importlib.metadata import version as _pkg_version
     _VERSION = _pkg_version("kwcode")
 except Exception:
-    _VERSION = "1.5.1"
+    _VERSION = "1.6.1"
 
 
 class TaskRequest(BaseModel):

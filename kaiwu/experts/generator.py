@@ -297,8 +297,9 @@ class GeneratorExpert:
                 explanation_parts.append(f"{fpath}:{func_name}")
 
         if not patches:
-            logger.warning("Generator: no patches produced")
-            return None
+            # Fallback: 逐函数patch全失败时，尝试whole_file路径
+            logger.warning("Generator: no patches produced, trying whole_file fallback")
+            return self._run_whole_file(ctx, files)
 
         result = {
             "patches": patches,
@@ -570,15 +571,14 @@ class GeneratorExpert:
         import os
         full_path = os.path.join(ctx.project_root, target_file)
 
-        # 防止覆盖已有文件：如果文件已存在，加数字后缀
+        # 如果文件已存在，走whole_file覆盖（不生成_1.py）
         if os.path.exists(full_path):
-            base, ext = os.path.splitext(target_file)
-            for i in range(1, 100):
-                candidate = f"{base}_{i}{ext}"
-                if not os.path.exists(os.path.join(ctx.project_root, candidate)):
-                    target_file = candidate
-                    full_path = os.path.join(ctx.project_root, candidate)
-                    break
+            result = {
+                "patches": [{"file": target_file, "content": code, "write_mode": "whole_file"}],
+                "explanation": f"已覆盖：{target_file}",
+            }
+            ctx.generator_output = result
+            return result
 
         result = {
             "patches": [{"file": target_file, "original": "", "modified": code}],

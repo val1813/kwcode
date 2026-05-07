@@ -134,6 +134,13 @@ class GapDetector:
         none_calls = len(re.findall(r'where None = \w+\(', output))
         if none_calls >= 2:
             return True
+        # 扩展模式：TypeError: XxxClass() takes no arguments（pass的__init__被调用）
+        if 'TypeError' in output and 'takes no arguments' in output:
+            return True
+        # 扩展模式：多个TypeError（存根类被实例化/调用）
+        type_errors = len(re.findall(r'TypeError:', output))
+        if type_errors >= 3:
+            return True
         return False
 
     def _all_passed(self, output: str) -> bool:

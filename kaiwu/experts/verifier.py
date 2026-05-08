@@ -58,12 +58,13 @@ def _detect_project_language(project_root: str, tool_executor: ToolExecutor) -> 
     try:
         entries = tool_executor.list_dir(project_root)
         if isinstance(entries, list):
+            # TypeScript projects usually have both package.json and tsconfig.json.
+            # Prefer tsconfig so verifier selects the TS runner and test-file patterns.
+            if "tsconfig.json" in entries:
+                return "typescript"
             for entry in entries:
                 if entry in _PROJECT_MARKERS:
                     return _PROJECT_MARKERS[entry]
-            # 检查tsconfig（覆盖package.json → typescript）
-            if "tsconfig.json" in entries:
-                return "typescript"
     except Exception:
         pass
     return "python"

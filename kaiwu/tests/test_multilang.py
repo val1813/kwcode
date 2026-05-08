@@ -420,6 +420,56 @@ Time:   1.2s
         info = v._classify_error("--- FAIL: TestAdd (0.00s)\n    add_test.go:10: expected 5, got 3")
         assert "TestAdd" in info["failed_tests"]
 
+    def test_parse_go_structured_failure(self):
+        from kaiwu.core.test_parser import parse_test_failures
+
+        output = """--- FAIL: TestAdd (0.00s)
+    calculator_test.go:12: expected 5, got 3
+--- PASS: TestSub (0.00s)
+FAIL
+"""
+        failures = parse_test_failures(output)
+
+        assert len(failures) == 1
+        assert failures[0]["test_name"] == "TestAdd"
+        assert failures[0]["file"] == "calculator_test.go"
+        assert failures[0]["line"] == 12
+        assert failures[0]["expected"] == "5"
+        assert failures[0]["actual"] == "3"
+
+    def test_parse_jest_structured_failure(self):
+        from kaiwu.core.test_parser import parse_test_failures
+
+        output = """FAIL  src/calculator.test.ts
+  add
+    ✕ returns sum (5 ms)
+
+  ● add › returns sum
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 5
+    Received: 3
+
+      9 | describe("add", () => {
+     10 |   it("returns sum", () => {
+    >11 |     expect(add(1, 2)).toBe(5);
+        |                       ^
+     12 |   });
+
+      at Object.<anonymous> (src/calculator.test.ts:11:23)
+
+Tests:       1 failed, 0 passed, 1 total
+"""
+        failures = parse_test_failures(output)
+
+        assert len(failures) == 1
+        assert failures[0]["test_name"] == "add › returns sum"
+        assert failures[0]["file"] == "src/calculator.test.ts"
+        assert failures[0]["line"] == 11
+        assert failures[0]["expected"] == "5"
+        assert failures[0]["actual"] == "3"
+
     def test_classify_error_rust_test_fail(self):
         from kaiwu.experts.verifier import VerifierExpert
         v = VerifierExpert(llm=MagicMock(), tool_executor=MagicMock())
@@ -442,6 +492,12 @@ Time:   1.2s
         mock_tools = MagicMock()
         mock_tools.list_dir.return_value = ["Cargo.toml", "src", "tests"]
         assert _detect_project_language("/fake", mock_tools) == "rust"
+
+    def test_detect_project_language_prefers_typescript_over_package_json(self):
+        from kaiwu.experts.verifier import _detect_project_language
+        mock_tools = MagicMock()
+        mock_tools.list_dir.return_value = ["package.json", "tsconfig.json", "src", "tests"]
+        assert _detect_project_language("/fake", mock_tools) == "typescript"
 
     def test_detect_project_language_default_python(self):
         from kaiwu.experts.verifier import _detect_project_language

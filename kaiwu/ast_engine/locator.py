@@ -15,6 +15,12 @@ from typing import Optional
 from kaiwu.ast_engine.parser import TreeSitterParser
 from kaiwu.ast_engine.call_graph import CallGraph
 
+try:
+    from kaiwu.ast_engine.ast_grep_backend import AST_GREP_AVAILABLE, AstGrepParser
+except ImportError:  # pragma: no cover - fallback for minimal installs
+    AST_GREP_AVAILABLE = False
+    AstGrepParser = None
+
 logger = logging.getLogger(__name__)
 
 # Common Python builtins / noise words to skip during keyword matching
@@ -30,7 +36,12 @@ class ASTLocator:
     """AST-based locator using tree-sitter call graph."""
 
     def __init__(self, parser: Optional[TreeSitterParser] = None):
-        self.parser = parser or TreeSitterParser()
+        if parser is not None:
+            self.parser = parser
+        elif AST_GREP_AVAILABLE and AstGrepParser is not None:
+            self.parser = AstGrepParser()
+        else:
+            self.parser = TreeSitterParser()
 
     def locate(self, project_root: str, task_description: str,
                error_keywords: Optional[list[str]] = None) -> dict:

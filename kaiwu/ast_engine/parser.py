@@ -33,9 +33,12 @@ class TreeSitterParser:
             self._languages[lang_key] = lang
             self._parsers[lang_key] = tree_sitter.Parser(lang)
 
-    def _detect_language(self, filepath: str) -> Optional[str]:
+    def detect_language(self, filepath: str) -> Optional[str]:
         ext = os.path.splitext(filepath)[1].lower()
         return self.EXT_MAP.get(ext)
+
+    def _detect_language(self, filepath: str) -> Optional[str]:
+        return self.detect_language(filepath)
 
     def parse_file(self, filepath: str) -> Optional[tree_sitter.Tree]:
         """Parse a single file. Returns tree or None if unsupported."""

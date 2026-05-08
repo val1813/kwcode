@@ -117,7 +117,7 @@
 1. SQLite 跨 session 查询（spec §7.1 kaiwu.db）
 2. 12 个预置专家完整 benchmark（目前只跑了 BugFix+TestGen）
 3. 实时数据API提示注入（codegen涉及天气/股价时，prompt注入免费API信息，避免模型编造假数据）
-4. 多语言AST支持（JavaScript/TypeScript/Java/Go/Rust 调用图）
+4. 多语言AST支持（ast-grep backend 已接入；Go MVP 已完成；JavaScript/TypeScript/Java/Rust 调用图待做）
 5. pip publish 到 PyPI
 6. install.ps1 / install.sh 一键安装脚本
 
@@ -173,7 +173,7 @@ kwcode/
     ├── notification/            # 飞轮通知(expert_born/progress/milestone)
     ├── stats/                   # 价值量化(SQLite)
     ├── memory/                  # 三层记忆(PROJECT/EXPERT/PATTERN)
-    ├── ast_engine/              # tree-sitter AST + 调用图(SQLite)
+    ├── ast_engine/              # ast-grep/tree-sitter AST + 调用图(SQLite)
     ├── mcp/                     # MCP Router
     ├── llm/                     # Ollama + llama.cpp双后端
     ├── tools/                   # 5个确定性工具

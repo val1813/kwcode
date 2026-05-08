@@ -103,7 +103,8 @@ class CallGraph:
             for fname in sorted(filenames):
                 if file_count >= max_files:
                     break
-                if not fname.endswith(".py"):
+                language = parser.detect_language(fname)
+                if language is None:
                     continue
 
                 fpath = os.path.join(dirpath, fname)
@@ -122,7 +123,7 @@ class CallGraph:
                 file_count += 1
 
                 # Extract and register functions
-                functions = parser.extract_functions(tree, source)
+                functions = parser.extract_functions(tree, source, language)
                 for func in functions:
                     graph.add_function(
                         name=func["name"],
@@ -132,7 +133,7 @@ class CallGraph:
                     )
 
                 # Extract calls and build edges
-                calls = parser.extract_calls(tree, source)
+                calls = parser.extract_calls(tree, source, language)
                 for call in calls:
                     caller = call["in_function"]
                     callee = call["name"]

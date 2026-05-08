@@ -14,11 +14,15 @@ from typing import Optional
 
 from kaiwu.ast_engine.parser import TreeSitterParser
 
+try:
+    from kaiwu.ast_engine.ast_grep_backend import AST_GREP_AVAILABLE, AstGrepParser
+except ImportError:  # pragma: no cover - fallback for minimal installs
+    AST_GREP_AVAILABLE = False
+    AstGrepParser = None
+
 logger = logging.getLogger(__name__)
 
 DB_PATH = Path.home() / ".kwcode" / "graph.db"
-
-SUPPORTED_EXTENSIONS = {".py"}  # MVP: Python only (tree-sitter-python)
 
 SKIP_DIRS = {
     ".git", "__pycache__", "node_modules", ".venv", "venv",
@@ -35,7 +39,10 @@ class GraphBuilder:
     def __init__(self, project_root: str):
         self.project_root = str(Path(project_root).resolve())
         self.db_path = DB_PATH
-        self._parser = TreeSitterParser()
+        if AST_GREP_AVAILABLE and AstGrepParser is not None:
+            self._parser = AstGrepParser()
+        else:
+            self._parser = TreeSitterParser()
         self._init_db()
 
     def _get_conn(self) -> sqlite3.Connection:
@@ -215,8 +222,7 @@ class GraphBuilder:
         for dirpath, dirnames, filenames in os.walk(self.project_root):
             dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS and not d.startswith(".")]
             for fname in sorted(filenames):
-                ext = os.path.splitext(fname)[1].lower()
-                if ext not in SUPPORTED_EXTENSIONS:
+                if self._parser.detect_language(fname) is None:
                     continue
                 if any(fname.startswith(p) or p in fname for p in SKIP_FILE_PATTERNS):
                     continue
@@ -236,8 +242,12 @@ class GraphBuilder:
         except Exception:
             return 0, 0
 
-        functions = self._parser.extract_functions(tree, source)
-        calls = self._parser.extract_calls(tree, source)
+        language = self._parser.detect_language(file_path)
+        if language is None:
+            return 0, 0
+
+        functions = self._parser.extract_functions(tree, source, language)
+        calls = self._parser.extract_calls(tree, source, language)
 
         node_count = 0
         edge_count = 0

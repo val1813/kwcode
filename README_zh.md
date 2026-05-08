@@ -97,9 +97,9 @@ Claude Code、Cursor 把代码发到海外服务器。公司代码、内网项�
 结果：精准的相关函数集合，直接注入 Generator
 ```
 
-技术实现：`tree-sitter` 多语言 AST + `rank-bm25` + `SQLite` 调用图持久化。不需要 Neo4j，不需要 Docker，不需要 embedding 模型。
+技术实现：`ast-grep`（基于 tree-sitter 的结构化查询）+ `rank-bm25` + `SQLite` 调用图持久化。不需要 Neo4j，不需要 Docker，不需要 embedding 模型。
 
-支持语言：Python（已完成）· JavaScript/TypeScript/Java/Go/Rust（规划中）
+支持语言：Python（已完成）· Go（MVP：函数/方法/基础调用图）· JavaScript/TypeScript/Java/Rust（规划中）
 
 ---
 
@@ -410,7 +410,7 @@ kaiwu/
 ├── flywheel/                # 专家飞轮（轨迹→模式→生成→AB测试）
 ├── registry/                # 专家注册表 + .kwx 打包
 ├── memory/                  # 三层记忆系统
-├── ast_engine/              # tree-sitter AST + 调用图
+├── ast_engine/              # ast-grep/tree-sitter AST + 调用图
 ├── notification/            # 飞轮通知
 ├── stats/                   # 价值量化（SQLite）
 └── llm/                     # Ollama + llama.cpp 双后端
@@ -451,7 +451,7 @@ kwcode expert create MyExpert
 # 提 PR
 ```
 
-**语言支持扩展**：PHP · C# · Kotlin · Swift · Dart（AST 调用图）
+**语言支持扩展**：基于 ast-grep backend 扩展 JavaScript/TypeScript/Java/Rust/PHP/C#/Kotlin/Swift/Dart 调用图
 
 **B 站视频教程 / 技术博客**
 

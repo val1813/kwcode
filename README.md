@@ -116,7 +116,9 @@ BugFix · FastAPI · TestGen · API · DeepSeekAPI · Docstring · MyBatis · Of
         沿调用链追踪隐藏依赖
 ```
 
-技术实现：`tree-sitter` 多语言 AST + `rank-bm25` + `SQLite` 调用图持久化。
+技术实现：`ast-grep`（structured search on top of tree-sitter）+ `rank-bm25` + `SQLite` 调用图持久化。
+
+当前支持：Python（完整）· Go（MVP：函数/方法/基础调用图）。
 
 ### 原理三：Debug Subagent（运行时调试）
 
@@ -442,7 +444,7 @@ kaiwu/
 │   └── pattern_md.py        # PATTERN.md + REFLECTION.md
 ├── builtin_experts/         # 15 个 SKILL.md 领域知识目录
 ├── registry/                # 专家注册表（加载 SKILL.md）
-├── ast_engine/              # tree-sitter AST + 调用图
+├── ast_engine/              # ast-grep/tree-sitter AST + 调用图
 └── stats/                   # 价值量化（SQLite）
 ```
 
@@ -475,7 +477,8 @@ kaiwu/
 | **OpenCode** | 本地模型 coding agent 的产品形态参考；早期版本曾作为执行层底座探索 |
 | **SearXNG** | 零 API key 的本地搜索引擎，KWCode 集成为搜索后端 |
 | **rank-bm25** | BM25Plus 算法实现，用于代码定位和搜索结果重排 |
-| **tree-sitter** | 多语言 AST 解析，用于调用图构建 |
+| **ast-grep** | 基于 tree-sitter 的结构化 AST 查询，用于多语言调用图构建 |
+| **tree-sitter** | ast-grep 与 fallback parser 的底层 AST 解析能力 |
 | **sentence-transformers** | Cross-Encoder 模型，用于搜索结果精排（可选依赖） |
 
 ### 设计决策的来源
@@ -513,7 +516,7 @@ mkdir kaiwu/builtin_experts/vue3
 急需的领域知识：Vue3 · Django · Go Gin · Rust Actix · K8s · Docker · Redis · MySQL · React · Next.js
 
 **其他方向**：
-- 多语言 AST 支持（JavaScript/TypeScript/Java/Go）
+- 基于 ast-grep backend 扩展多语言 AST 支持（JavaScript/TypeScript/Java/Rust 等）
 - bench_tasks 补齐（bugfix 类、跨文件类）
 - 新的确定性脚本（`scripts/` 目录下，不进 LLM context）
 - 飞轮优化规则的质量验证

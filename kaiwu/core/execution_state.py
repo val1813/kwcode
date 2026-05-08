@@ -79,6 +79,12 @@ class ExecutionStateTracker:
                 return delta.attempt
         return None
 
+    def get_new_failures(self) -> list[str]:
+        """返回最近一次attempt新引入的失败测试。"""
+        if not self._history:
+            return []
+        return list(self._history[-1].newly_failing)
+
     def get_progress_summary(self) -> dict:
         """获取当前进展摘要（供审计日志使用）。"""
         if not self._history:

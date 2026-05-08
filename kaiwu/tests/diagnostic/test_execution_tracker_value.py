@@ -55,6 +55,17 @@ class TestExecutionTrackerValue:
         assert best.attempt == 0
         assert "test_a" in best.newly_passing
 
+    def test_latest_new_failures_feed_retry_hint(self):
+        """最近一次新增失败应能被orchestrator用于回归重试提示。"""
+        tracker = ExecutionStateTracker()
+        tracker.set_baseline(["test_a"])
+
+        tracker.record(0, ["test_a"], [], "logic_error")
+        assert tracker.get_new_failures() == []
+
+        tracker.record(1, ["test_a", "test_c", "test_d"], [], "logic_error")
+        assert tracker.get_new_failures() == ["test_c", "test_d"]
+
     def test_scenario_3_immediate_regression(self):
         """场景3：第一次修改就引入回归。"""
         tracker = ExecutionStateTracker()

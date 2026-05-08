@@ -102,9 +102,20 @@ class VerifierExpert:
         passed, total, error = self._run_tests(ctx)
         from kaiwu.core.test_parser import parse_test_failures
         structured = parse_test_failures(error) if error else []
-        return {"passed": passed, "total": total, "output": error,
+        output = error or self._format_success_output(passed, total)
+        return {"passed": passed, "total": total, "output": output,
                 "error_type": self._classify_error(error)["error_type"] if error else "",
                 "structured_failures": structured}
+
+    @staticmethod
+    def _format_success_output(passed: int, total: int) -> str:
+        """Return a minimal runner-like summary so GapDetector can see green baselines."""
+        if total <= 0:
+            return ""
+        if passed == total:
+            return f"{passed} passed"
+        failed = max(total - passed, 0)
+        return f"{passed} passed, {failed} failed"
 
     def _check_toolchain(self, lang: str, project_root: str) -> str:
         """检测工具链是否存在。返回错误信息或空字符串。"""
@@ -423,6 +434,19 @@ class VerifierExpert:
         """
         # Detect project language
         project_lang = _detect_project_language(ctx.project_root, self.tools)
+
+        confirmed_cmd = getattr(ctx, "confirmed_test_cmd", "")
+        if confirmed_cmd:
+            stdout, stderr, rc = self.tools.run_bash(
+                confirmed_cmd,
+                cwd=ctx.project_root,
+                timeout=120,
+            )
+            output = stdout + "\n" + stderr
+            passed, total = self._parse_test_output(output, project_lang)
+            if rc == 0:
+                return passed, total, ""
+            return passed, total, output.strip()[:4000]
 
         # Get test runners for this language
         runners = TEST_RUNNERS.get(project_lang, TEST_RUNNERS["python"])

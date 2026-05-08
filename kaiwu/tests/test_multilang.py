@@ -511,6 +511,49 @@ Tests:       1 failed, 0 passed, 1 total
             assert lang in TEST_RUNNERS, f"Missing test runner for {lang}"
             assert len(TEST_RUNNERS[lang]) > 0
 
+    def test_run_tests_only_keeps_green_baseline_visible(self):
+        from kaiwu.core.context import TaskContext
+        from kaiwu.core.gap_detector import GapDetector, GapType
+        from kaiwu.experts.verifier import VerifierExpert
+
+        tools = MagicMock()
+        tools.list_dir.return_value = ["tests", "src"]
+        verifier = VerifierExpert(llm=MagicMock(), tool_executor=tools)
+        verifier._run_tests = MagicMock(return_value=(5, 5, ""))
+
+        result = verifier.run_tests_only(TaskContext(project_root="/fake"))
+
+        assert result["output"] == "5 passed"
+        assert GapDetector().compute(result["output"]).gap_type == GapType.NONE
+
+    def test_run_tests_uses_confirmed_env_probe_command(self):
+        from kaiwu.core.context import TaskContext
+        from kaiwu.experts.verifier import VerifierExpert
+
+        tools = MagicMock()
+        tools.list_dir.return_value = ["tests", "src"]
+        tools.run_bash.return_value = (
+            "2 passed, 1 failed in 0.10s",
+            "",
+            1,
+        )
+        verifier = VerifierExpert(llm=MagicMock(), tool_executor=tools)
+        ctx = TaskContext(
+            project_root="/fake",
+            confirmed_test_cmd="python -m pytest -x -q",
+        )
+
+        passed, total, error = verifier._run_tests(ctx)
+
+        tools.run_bash.assert_called_once_with(
+            "python -m pytest -x -q",
+            cwd="/fake",
+            timeout=120,
+        )
+        assert passed == 2
+        assert total == 3
+        assert "1 failed" in error
+
 
 # ═══════════════════════════════════════════════════════════════════
 # Graph Builder Extension Tests

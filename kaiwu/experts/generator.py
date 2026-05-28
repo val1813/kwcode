@@ -164,6 +164,7 @@ GENERATOR_TEST_PROMPT = """你是测试生成专家。为下面的代码生成 p
 
 
 _LANG_KEYWORDS = {
+    ".py":   ["python", "代码", "程序", "sqlalchemy", "pymysql", "django", "flask", "fastapi", "sqlmodel", "mysqlclient", "aiomysql", "异步", "协程", "装饰器", "pytest", "unittest"],
     ".html": ["html", "网页", "页面", "web page", "webpage", "website", "前端页面"],
     ".js":   ["javascript", "js", "node", "nodejs", "react", "vue"],
     ".ts":   ["typescript", "ts", "angular"],

@@ -33,6 +33,7 @@ REPL_COMMANDS = {
     "/stats":   "查看任务统计和Gate准确率",
     "/exit":    "退出",
 }
+REPL_TIPS = "多行粘贴: 直接粘贴代码，按 Esc+Enter 提交  |  单行输入: 直接 Enter 提交"
 
 
 class SessionState:
@@ -157,6 +158,7 @@ def repl(model_path, ollama_url, ollama_model, project_root, verbose, no_search=
         status.refresh_ram()
         width = console.width
         bar = escape_html(status.render(width))
+        bar += " | Esc+Enter 提交 | /help 帮助"
         return HTML(f'<style bg="#1a1a1a" fg="#666666">{bar}</style>')
 
     # Slash command completer — 输入/后弹出命令菜单
@@ -182,6 +184,7 @@ def repl(model_path, ollama_url, ollama_model, project_root, verbose, no_search=
             user_input = session.prompt(
                 " > ",
                 bottom_toolbar=_toolbar,
+                multiline=True,
             ).strip()
         except (KeyboardInterrupt, EOFError):
             console.print("\n  [dim]bye[/dim]")
@@ -201,6 +204,8 @@ def repl(model_path, ollama_url, ollama_model, project_root, verbose, no_search=
                 break
 
             elif cmd == "/help":
+                console.print(f"  [dim]{REPL_TIPS}[/dim]")
+                console.print()
                 for k, v in REPL_COMMANDS.items():
                     console.print(f"  [cyan]{k:10s}[/cyan] {v}")
 

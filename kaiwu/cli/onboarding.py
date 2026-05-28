@@ -108,7 +108,7 @@ def _configure_api(net: dict) -> dict:
         api_key = Prompt.ask(
             "  API Key [dim](本地模型留空，直接回车)[/dim]",
             default="",
-            password=True,
+            password=False,
         ).strip()
 
         model = Prompt.ask(

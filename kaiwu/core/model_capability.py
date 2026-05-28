@@ -84,6 +84,7 @@ def detect_model_tier(model_name: str, ollama_url: str = "http://localhost:11434
     if tier is None:
         tier = _detect_from_name(model_name)
 
+    tier = _validate_hardware(model_name, tier)
     _tier_cache[model_name] = tier
     logger.info("[model_capability] %s → %s", model_name, tier.value)
     return tier
@@ -268,3 +269,51 @@ def tier_display_name(tier: ModelTier) -> str:
         ModelTier.MEDIUM: "中等模型",
         ModelTier.LARGE: "大模型模式",
     }[tier]
+
+
+def _detect_vram_gb() -> float | None:     #用nvidia-smi检测gpu显存，不是英伟达的卡返回none
+    try:
+        import subprocess
+        out = subprocess.check_output(
+            ["nvidia-smi", "--query-gpu=memory.total",
+             "--format=csv,noheader,nounits"],
+            timeout=5, text=True,
+        )
+        vram_mib = float(out.strip().splitlines()[0])
+        return round(vram_mib / 1024, 1)
+    except Exception:
+        return None
+
+
+def _detect_sysram_gb() -> float | None:
+    try:
+        import psutil  #检测总机内存，psutil已经是项目依赖
+        return round(psutil.virtual_memory().total / (1024 ** 3), 1)
+    except Exception:
+        return None
+
+#硬件能力与模型参数交叉验证，如果跑不动就做告知（logging.warning），暂时不改tier 跳过不影响主流程
+def _validate_hardware(model_name: str, tier: ModelTier) -> ModelTier:
+    vram = _detect_vram_gb()
+    sysram = _detect_sysram_gb()
+    if vram is None:
+        return tier
+    total_ram = vram + (sysram or 0)
+#根据总内存去决定级别，如果显存溢出ollama自己默认在cpu占用系统内存跑，后续要做优化比如增加内存分配的功能，毕竟显卡才是跑llm的核心
+    if total_ram < 8:
+        hw_limit = ModelTier.SMALL
+    elif total_ram < 16:
+        hw_limit = ModelTier.SMALL
+    elif total_ram < 24:
+        hw_limit = ModelTier.MEDIUM
+    else:
+        hw_limit = ModelTier.LARGE
+    _order = {ModelTier.SMALL: 0, ModelTier.MEDIUM: 1, ModelTier.LARGE: 2}
+    if _order[tier] > _order[hw_limit]:
+        logger.warning(
+            "[model_capability]    硬件可能无法流畅运行 %s(VRAM %.1fGB + RAM %.1fGB = %.1fGB)"
+            "建议换用较小的模型。",
+            model_name, vram, sysram or 0, total_ram,
+        )
+
+    return tier

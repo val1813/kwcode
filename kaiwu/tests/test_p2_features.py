@@ -70,6 +70,38 @@ class TestModelCapability:
         detect_model_tier("test-cache:8b", "http://localhost:99999")
         assert "test-cache:8b" in _tier_cache
 
+    def test_hardware_validate_no_warning_when_sufficient(self):#内存够
+        from unittest.mock import patch
+
+        from kaiwu.core.model_capability import ModelTier, _validate_hardware
+
+        with patch("kaiwu.core.model_capability._detect_vram_gb", return_value=24.0), \
+             patch("kaiwu.core.model_capability._detect_sysram_gb", return_value=32.0):
+            result = _validate_hardware("qwen3:72b", ModelTier.LARGE)
+            assert result == ModelTier.LARGE
+
+    def test_hardware_validate_warns_when_insufficient(self, caplog):#小跑大
+        import logging
+        from unittest.mock import patch
+
+        from kaiwu.core.model_capability import ModelTier, _validate_hardware
+        with patch("kaiwu.core.model_capability._detect_vram_gb", return_value=4.0), \
+             patch("kaiwu.core.model_capability._detect_sysram_gb", return_value=8.0):
+            with caplog.at_level(logging.WARNING):
+                result = _validate_hardware("qwen3:72b", ModelTier.LARGE)
+            assert result == ModelTier.LARGE
+            assert "硬件可能无法流畅运行" in caplog.text
+
+    def test_hardware_validate_no_nvidia_skips(self):#无英伟达卡
+        from unittest.mock import patch
+
+        from kaiwu.core.model_capability import ModelTier, _validate_hardware
+
+        with patch("kaiwu.core.model_capability._detect_vram_gb", return_value=None), \
+             patch("kaiwu.core.model_capability._detect_sysram_gb", return_value=16.0):
+            result = _validate_hardware("qwen3:72b", ModelTier.LARGE)
+            assert result == ModelTier.LARGE
+
 
 # ── Task 2: Flywheel Notifier ─────────────────────────────
 
